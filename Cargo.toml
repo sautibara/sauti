@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 cpal = "0.15.2"
+dasp_sample = "0.11.0"
 thiserror = "1.0.53"

@@ -11,92 +11,124 @@ impl Cpal {
     fn find_config(
         device: &cpal::Device,
         options: DeviceOptions,
-    ) -> AudioResult<cpal::StreamConfig> {
+    ) -> AudioResult<cpal::SupportedStreamConfig> {
         if options.is_empty() {
             device
                 .default_output_config()
                 .map_err(|err| default_stream_config_error(err, device))
-                .map(|config| config.config())
         } else {
             todo!("cpal stream config")
         }
     }
 
-    fn create_stream(
+    fn create_stream<S: ConvertibleSample, B: SoundSource>(
         device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        mut handler: impl FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static,
+        config: &cpal::SupportedStreamConfig,
+        source: &B,
     ) -> AudioResult<cpal::Stream> {
-        let data_config = config.clone();
-        let sample_context = SampleContext {
-            sample_rate: config.sample_rate.0,
+        let device_info = DeviceInfo {
+            sample_rate: config.sample_rate().0,
+            sample_format: config.sample_format(),
+            channels: config.channels(),
         };
+        let concrete_config = config.config();
+        let channels = concrete_config.channels;
+
+        // build the sound handler
+        let mut handler = source.build::<S>(device_info);
+
+        // build the stream and pass in the handler
         device
             .build_output_stream(
-                config,
-                // FIXME: currently this doesn't respect what the stream actually expects
-                move |data, _| {
-                    Self::data_callback(data, &mut handler, &data_config, &sample_context)
-                },
+                &concrete_config,
+                move |data, _| Self::data_callback(data, &mut handler, channels),
+                // TODO: find some other way to notify of errors
                 |err| eprintln!("{err:?}"),
                 None,
             )
             .map_err(|err| build_stream_error(err, device))
     }
 
-    fn data_callback(
-        data: &mut [f32],
-        handler: &mut (impl FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static),
-        config: &cpal::StreamConfig,
-        sample_context: &SampleContext,
+    fn data_callback<S: SizedSample>(
+        data: &mut [S],
+        handler: &mut (impl FnMut(&mut [S]) + Send + Sync + 'static),
+        channels: u16,
     ) {
-        for sample in data.chunks_mut(config.channels as usize) {
-            handler(sample, sample_context);
+        for sample in data.chunks_mut(channels as usize) {
+            handler(sample);
         }
     }
 }
 
 impl Audio for Cpal {
-    type Device<F: FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static, B: FnMut() -> F> =
-        CpalDevice<F, B>;
-
-    fn start<F: FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static, B: FnMut() -> F>(
+    fn start<B: SoundSource>(
         &self,
         options: DeviceOptions,
-        mut handler_builder: B,
-    ) -> AudioResult<Self::Device<F, B>> {
+        source: B,
+    ) -> AudioResult<Box<dyn Device>> {
         let host = cpal::default_host();
         let device = Cpal::find_device(host)?;
         let config = Cpal::find_config(&device, options)?;
 
-        let stream = Cpal::create_stream(&device, &config, handler_builder())?;
+        match config.sample_format() {
+            SampleFormat::I8 => CpalDevice::<i8, B>::new_boxed(device, config, source),
+            SampleFormat::I16 => CpalDevice::<i16, B>::new_boxed(device, config, source),
+            SampleFormat::I32 => CpalDevice::<i32, B>::new_boxed(device, config, source),
+            SampleFormat::I64 => CpalDevice::<i64, B>::new_boxed(device, config, source),
+            SampleFormat::U8 => CpalDevice::<u8, B>::new_boxed(device, config, source),
+            SampleFormat::U16 => CpalDevice::<u16, B>::new_boxed(device, config, source),
+            SampleFormat::U32 => CpalDevice::<u32, B>::new_boxed(device, config, source),
+            SampleFormat::U64 => CpalDevice::<u64, B>::new_boxed(device, config, source),
+            SampleFormat::F32 => CpalDevice::<f32, B>::new_boxed(device, config, source),
+            SampleFormat::F64 => CpalDevice::<f64, B>::new_boxed(device, config, source),
+            format => Err(AudioError::UnrecognizedSampleFormat(format)),
+        }
+    }
+}
 
+pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
+    source: B,
+    stream: cpal::Stream,
+    device: cpal::Device,
+    config: cpal::SupportedStreamConfig,
+    sample_marker: std::marker::PhantomData<S>,
+}
+
+impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
+    fn new(
+        device: cpal::Device,
+        config: cpal::SupportedStreamConfig,
+        source: B,
+    ) -> AudioResult<Self> {
+        let stream = Cpal::create_stream::<S, B>(&device, &config, &source)?;
+
+        // the stream sometimes starts off paused, so resume it
         stream
             .play()
             .map_err(|err| play_stream_error(err, &device))?;
 
         Ok(CpalDevice {
-            handler_builder,
+            source,
             stream,
             device,
             config,
+            sample_marker: std::marker::PhantomData,
         })
+    }
+
+    fn new_boxed(
+        device: cpal::Device,
+        config: cpal::SupportedStreamConfig,
+        source: B,
+    ) -> AudioResult<Box<dyn Device>> {
+        // map doesn't work for some reason
+        Ok(Box::new(Self::new(device, config, source)?))
     }
 }
 
-pub struct CpalDevice<F: FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static, B: FnMut() -> F>
-{
-    handler_builder: B,
-    stream: cpal::Stream,
-    device: cpal::Device,
-    config: cpal::StreamConfig,
-}
-
-impl<F: FnMut(&mut [f32], &SampleContext) + Send + Sync + 'static, B: FnMut() -> F> Device<F, B>
-    for CpalDevice<F, B>
-{
+impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
     fn restart(&mut self) -> AudioResult<()> {
-        let stream = Cpal::create_stream(&self.device, &self.config, (self.handler_builder)())?;
+        let stream = Cpal::create_stream::<S, B>(&self.device, &self.config, &self.source)?;
         self.stream = stream; // old stream drops and disconnects
 
         // start the stream again
