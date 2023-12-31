@@ -1,16 +1,19 @@
-use super::*;
+use super::{
+    Audio, AudioError, AudioResult, ConvertibleSample, Device, DeviceInfo, DeviceOptions,
+    DeviceTrait, HostTrait, SampleFormat, SizedSample, SoundSource, StreamTrait,
+};
 
 pub struct Cpal;
 
 impl Cpal {
-    fn find_device(host: cpal::Host) -> AudioResult<cpal::Device> {
+    fn find_device(host: &cpal::Host) -> AudioResult<cpal::Device> {
         host.default_output_device()
             .ok_or(AudioError::NoDevicesFound)
     }
 
     fn find_config(
         device: &cpal::Device,
-        options: DeviceOptions,
+        options: &DeviceOptions,
     ) -> AudioResult<cpal::SupportedStreamConfig> {
         if options.is_empty() {
             device
@@ -67,8 +70,8 @@ impl Audio for Cpal {
         source: B,
     ) -> AudioResult<Box<dyn Device>> {
         let host = cpal::default_host();
-        let device = Cpal::find_device(host)?;
-        let config = Cpal::find_config(&device, options)?;
+        let device = Self::find_device(&host)?;
+        let config = Self::find_config(&device, &options)?;
 
         match config.sample_format() {
             SampleFormat::I8 => CpalDevice::<i8, B>::new_boxed(device, config, source),
@@ -107,7 +110,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             .play()
             .map_err(|err| play_stream_error(err, &device))?;
 
-        Ok(CpalDevice {
+        Ok(Self {
             source,
             stream,
             device,
@@ -145,6 +148,25 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         self.stream
             .pause()
             .map_err(|err| pause_stream_error(err, &self.device))
+    }
+
+    fn info(&self) -> DeviceInfo {
+        DeviceInfo {
+            sample_rate: self.config.sample_rate().0,
+            sample_format: self.config.sample_format(),
+            channels: self.config.channels(),
+        }
+    }
+
+    fn change_sample_rate(&mut self, new: u32) -> AudioResult<()> {
+        self.config = cpal::SupportedStreamConfig::new(
+            self.config.channels(),
+            cpal::SampleRate(new),
+            self.config.buffer_size().clone(),
+            self.config.sample_format(),
+        );
+
+        self.restart()
     }
 }
 
@@ -189,7 +211,7 @@ fn build_stream_error(err: cpal::BuildStreamError, device: &cpal::Device) -> Aud
 impl From<cpal::DeviceNameError> for AudioError {
     fn from(value: cpal::DeviceNameError) -> Self {
         let cpal::DeviceNameError::BackendSpecific { err } = value;
-        AudioError::BackendError(err.description)
+        Self::BackendError(err.description)
     }
 }
 

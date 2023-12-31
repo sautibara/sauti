@@ -1,3 +1,53 @@
+#![allow(clippy::needless_doctest_main)] // meant to show an example
+//! Low-level audio handling
+//!
+//! # Examples
+//!
+//! ```no_run
+//! use sauti::audio::{Audio, ConvertibleSample, DeviceInfo, DeviceOptions, SoundSource};
+//!
+//! // this program outputs a 440.0 hz sin wave on the main device
+//! fn main() {
+//!     // start outputting sound on the default device
+//!     let audio = sauti::audio::default();
+//!     let _device = audio
+//!         .start(DeviceOptions::default(), Beep { frequency: 440.0 })
+//!         .expect("failed to start outputting sound");
+//!
+//!     // wait for something in the console, ignore it, and then exit
+//!     std::io::stdin()
+//!         .read_line(&mut String::new())
+//!         .expect("failed to read stdin");
+//! }
+//!
+//! struct Beep {
+//!     frequency: f64,
+//! }
+//!
+//! impl SoundSource for Beep {
+//!     // the sound source is generic over the sample type
+//!     fn build<S: ConvertibleSample>(
+//!         &self,
+//!         info: DeviceInfo,
+//!     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+//!         // config from the source can be passed in
+//!         let frequency = self.frequency;
+//!         // and internal variables can be initialized outside the closure
+//!         let mut clock = 0;
+//!
+//!         // this closure is run for each sample to get the values
+//!         // it's given a mutable slice `channels` that holds each channel of the current sample
+//!         move |channels| {
+//!             clock = (clock + 1) % info.sample_rate;
+//!             let val =
+//!                 (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
+//!             // S::from_sample must be used to convert the f64 value to the generic sample type
+//!             channels.fill(S::from_sample(val * 0.1));
+//!         }
+//!     }
+//! }
+//! ```
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp_sample::FromSample;
 use thiserror::Error;
@@ -10,7 +60,8 @@ pub use cpal::SampleFormat;
 pub use cpal::SizedSample;
 
 /// Find the default [`Audio`] handler
-pub fn default_audio() -> impl Audio {
+#[must_use]
+pub fn default() -> impl Audio {
     cpal_impl::Cpal
 }
 
@@ -19,6 +70,14 @@ pub fn default_audio() -> impl Audio {
 /// Sound is started using the [start](Self::start) method
 pub trait Audio {
     /// Create a new [`Device`] and start it running using a [`SoundSource`]
+    ///
+    /// # Errors
+    ///
+    /// - If there are no output devices available
+    /// - If the default output device isn't available
+    /// - If the default output device doesn't support `options`
+    /// - Other backend specific errors
+    // TODO: allow devices other than the default device (probably in DeviceOptions)
     fn start<S: SoundSource>(
         &self,
         options: DeviceOptions,
@@ -33,6 +92,10 @@ pub trait Device {
     fn restart(&mut self) -> AudioResult<()>;
     fn play(&mut self) -> AudioResult<()>;
     fn pause(&mut self) -> AudioResult<()>;
+
+    fn info(&self) -> DeviceInfo;
+
+    fn change_sample_rate(&mut self, new: u32) -> AudioResult<()>;
 }
 
 /// A source for sound played on a device
@@ -43,9 +106,12 @@ pub trait SoundSource: 'static {
     ///
     /// The producer is run for each sample and given a mutable slice of channels for the current sample.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
+    /// # use sauti::audio::*;
+    /// # struct Beep { frequency: f64 }
+    /// # impl SoundSource for Beep {
     /// fn build<S: ConvertibleSample>(
     ///     &self,
     ///     info: DeviceInfo,
@@ -66,6 +132,7 @@ pub trait SoundSource: 'static {
     ///         channels.fill(S::from_sample(val * 0.1));
     ///     }
     /// }
+    /// # }
     /// ```
     fn build<S: ConvertibleSample>(
         &self,
@@ -116,7 +183,8 @@ pub struct DeviceInfo {
 
 /// Desired options for a sound device
 ///
-/// If an option is not given, then the default config will be used for it
+/// If an option is not given, then the default config will be used for it. This includes the
+/// device itself: it will always use the default output device.
 #[derive(Default, Debug)]
 // TODO: builder pattern
 pub struct DeviceOptions {
@@ -128,6 +196,16 @@ pub struct DeviceOptions {
 impl DeviceOptions {
     pub fn is_empty(&self) -> bool {
         self.sample_rate.is_none() && self.sample_format.is_none() && self.channels.is_none()
+    }
+}
+
+impl From<DeviceInfo> for DeviceOptions {
+    fn from(info: DeviceInfo) -> Self {
+        DeviceOptions {
+            sample_rate: Some(info.sample_rate),
+            sample_format: Some(info.sample_format),
+            channels: Some(info.channels),
+        }
     }
 }
 
