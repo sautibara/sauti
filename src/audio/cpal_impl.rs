@@ -1,3 +1,5 @@
+use cpal::SupportedStreamConfig;
+
 use super::{
     Audio, AudioError, AudioResult, ConvertibleSample, Device, DeviceInfo, DeviceOptions,
     DeviceTrait, HostTrait, SampleFormat, SizedSample, SoundSource, StreamTrait,
@@ -93,7 +95,8 @@ pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
     source: B,
     stream: cpal::Stream,
     device: cpal::Device,
-    config: cpal::SupportedStreamConfig,
+    device_info: DeviceInfo,
+    buffer_size: cpal::SupportedBufferSize,
     sample_marker: std::marker::PhantomData<S>,
 }
 
@@ -114,7 +117,8 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             source,
             stream,
             device,
-            config,
+            buffer_size: config.buffer_size().clone(),
+            device_info: config.into(),
             sample_marker: std::marker::PhantomData,
         })
     }
@@ -127,11 +131,21 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
         // map doesn't work for some reason
         Ok(Box::new(Self::new(device, config, source)?))
     }
+
+    fn stream_config(&self) -> SupportedStreamConfig {
+        SupportedStreamConfig::new(
+            self.device_info.channels,
+            cpal::SampleRate(self.device_info.sample_rate),
+            self.buffer_size.clone(),
+            self.device_info.sample_format,
+        )
+    }
 }
 
 impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
     fn restart(&mut self) -> AudioResult<()> {
-        let stream = Cpal::create_stream::<S, B>(&self.device, &self.config, &self.source)?;
+        let stream =
+            Cpal::create_stream::<S, B>(&self.device, &self.stream_config(), &self.source)?;
         self.stream = stream; // old stream drops and disconnects
 
         // start the stream again
@@ -150,23 +164,24 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
             .map_err(|err| pause_stream_error(err, &self.device))
     }
 
-    fn info(&self) -> DeviceInfo {
-        DeviceInfo {
-            sample_rate: self.config.sample_rate().0,
-            sample_format: self.config.sample_format(),
-            channels: self.config.channels(),
-        }
+    fn info(&self) -> &DeviceInfo {
+        &self.device_info
     }
 
     fn change_sample_rate(&mut self, new: u32) -> AudioResult<()> {
-        self.config = cpal::SupportedStreamConfig::new(
-            self.config.channels(),
-            cpal::SampleRate(new),
-            self.config.buffer_size().clone(),
-            self.config.sample_format(),
-        );
+        self.device_info.sample_rate = new;
 
         self.restart()
+    }
+}
+
+impl From<SupportedStreamConfig> for DeviceInfo {
+    fn from(value: SupportedStreamConfig) -> Self {
+        Self {
+            sample_rate: value.sample_rate().0,
+            sample_format: value.sample_format(),
+            channels: value.channels(),
+        }
     }
 }
 

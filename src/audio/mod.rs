@@ -93,7 +93,7 @@ pub trait Device {
     fn play(&mut self) -> AudioResult<()>;
     fn pause(&mut self) -> AudioResult<()>;
 
-    fn info(&self) -> DeviceInfo;
+    fn info(&self) -> &DeviceInfo;
 
     fn change_sample_rate(&mut self, new: u32) -> AudioResult<()>;
 }
@@ -175,17 +175,38 @@ impl<
 }
 
 /// Information about the current sound device
+#[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub sample_rate: u32,
     pub sample_format: SampleFormat,
     pub channels: u16,
 }
 
+impl DeviceInfo {
+    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
+        Self {
+            sample_rate,
+            ..self
+        }
+    }
+
+    pub fn with_sample_format(self, sample_format: SampleFormat) -> Self {
+        Self {
+            sample_format,
+            ..self
+        }
+    }
+
+    pub fn with_channel_count(self, channels: u16) -> Self {
+        Self { channels, ..self }
+    }
+}
+
 /// Desired options for a sound device
 ///
 /// If an option is not given, then the default config will be used for it. This includes the
 /// device itself: it will always use the default output device.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 // TODO: builder pattern
 pub struct DeviceOptions {
     pub sample_rate: Option<u32>,
@@ -197,11 +218,53 @@ impl DeviceOptions {
     pub fn is_empty(&self) -> bool {
         self.sample_rate.is_none() && self.sample_format.is_none() && self.channels.is_none()
     }
+
+    pub fn with_sample_rate(self, rate: u32) -> Self {
+        Self {
+            sample_rate: Some(rate),
+            ..self
+        }
+    }
+
+    pub fn with_sample_format(self, format: SampleFormat) -> Self {
+        Self {
+            sample_format: Some(format),
+            ..self
+        }
+    }
+
+    pub fn with_channel_count(self, channels: u16) -> Self {
+        Self {
+            channels: Some(channels),
+            ..self
+        }
+    }
+
+    pub fn with_default_sample_rate(self) -> Self {
+        Self {
+            sample_rate: None,
+            ..self
+        }
+    }
+
+    pub fn with_default_sample_format(self) -> Self {
+        Self {
+            sample_format: None,
+            ..self
+        }
+    }
+
+    pub fn with_default_channel_count(self) -> Self {
+        Self {
+            channels: None,
+            ..self
+        }
+    }
 }
 
 impl From<DeviceInfo> for DeviceOptions {
     fn from(info: DeviceInfo) -> Self {
-        DeviceOptions {
+        Self {
             sample_rate: Some(info.sample_rate),
             sample_format: Some(info.sample_format),
             channels: Some(info.channels),
