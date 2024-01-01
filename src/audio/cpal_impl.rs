@@ -45,14 +45,20 @@ impl Cpal {
             .filter(|config| options_supports(options, config))
             .max_by(|a, b| a.cmp_default_heuristics(b));
 
-        let Some(best) = best else {
-            return Err(AudioError::DeviceOptionsNotSupported {
+        // there is a config supported
+        if let Some(best) = best {
+            // TODO: try merging default options first
+            Ok(best.with_max_sample_rate())
+        // try backup config
+        } else if let Some(backup) = options.backup.as_ref() {
+            Self::find_config(device, backup)
+        // it's not supported
+        } else {
+            Err(AudioError::DeviceOptionsNotSupported {
                 options: options.clone(),
                 device: device.name()?,
-            });
-        };
-
-        Ok(best.with_max_sample_rate())
+            })
+        }
     }
 
     fn create_stream<S: ConvertibleSample, B: SoundSource>(
@@ -100,21 +106,22 @@ impl Audio for Cpal {
         options: impl Into<DeviceOptions>,
         source: B,
     ) -> AudioResult<Box<dyn Device>> {
+        let options = options.into();
         let host = cpal::default_host();
         let device = Self::find_device(&host)?;
-        let config = Self::find_config(&device, &options.into())?;
+        let config = Self::find_config(&device, &options)?;
 
         match config.sample_format() {
-            SampleFormat::I8 => CpalDevice::<i8, B>::new_boxed(device, config, source),
-            SampleFormat::I16 => CpalDevice::<i16, B>::new_boxed(device, config, source),
-            SampleFormat::I32 => CpalDevice::<i32, B>::new_boxed(device, config, source),
-            SampleFormat::I64 => CpalDevice::<i64, B>::new_boxed(device, config, source),
-            SampleFormat::U8 => CpalDevice::<u8, B>::new_boxed(device, config, source),
-            SampleFormat::U16 => CpalDevice::<u16, B>::new_boxed(device, config, source),
-            SampleFormat::U32 => CpalDevice::<u32, B>::new_boxed(device, config, source),
-            SampleFormat::U64 => CpalDevice::<u64, B>::new_boxed(device, config, source),
-            SampleFormat::F32 => CpalDevice::<f32, B>::new_boxed(device, config, source),
-            SampleFormat::F64 => CpalDevice::<f64, B>::new_boxed(device, config, source),
+            SampleFormat::I8 => CpalDevice::<i8, B>::new_boxed(device, options, config, source),
+            SampleFormat::I16 => CpalDevice::<i16, B>::new_boxed(device, options, config, source),
+            SampleFormat::I32 => CpalDevice::<i32, B>::new_boxed(device, options, config, source),
+            SampleFormat::I64 => CpalDevice::<i64, B>::new_boxed(device, options, config, source),
+            SampleFormat::U8 => CpalDevice::<u8, B>::new_boxed(device, options, config, source),
+            SampleFormat::U16 => CpalDevice::<u16, B>::new_boxed(device, options, config, source),
+            SampleFormat::U32 => CpalDevice::<u32, B>::new_boxed(device, options, config, source),
+            SampleFormat::U64 => CpalDevice::<u64, B>::new_boxed(device, options, config, source),
+            SampleFormat::F32 => CpalDevice::<f32, B>::new_boxed(device, options, config, source),
+            SampleFormat::F64 => CpalDevice::<f64, B>::new_boxed(device, options, config, source),
             format => Err(AudioError::UnrecognizedSampleFormat(format)),
         }
     }
@@ -124,14 +131,21 @@ pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
     source: B,
     stream: cpal::Stream,
     device: cpal::Device,
+    /// The original options used to create this device
+    device_options: DeviceOptions,
+    /// Information about the current stream
     device_info: DeviceInfo,
+    /// The buffer size allowed for the current stream
     buffer_size: cpal::SupportedBufferSize,
+    // a marker to the sample this device is using
+    // cpal expects this sample type when creating the stream
     sample_marker: std::marker::PhantomData<S>,
 }
 
 impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
     fn new(
         device: cpal::Device,
+        device_options: DeviceOptions,
         config: cpal::SupportedStreamConfig,
         source: B,
     ) -> AudioResult<Self> {
@@ -146,6 +160,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             source,
             stream,
             device,
+            device_options,
             buffer_size: config.buffer_size().clone(),
             device_info: config.into(),
             sample_marker: std::marker::PhantomData,
@@ -154,11 +169,12 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
 
     fn new_boxed(
         device: cpal::Device,
+        device_options: DeviceOptions,
         config: cpal::SupportedStreamConfig,
         source: B,
     ) -> AudioResult<Box<dyn Device>> {
         // map doesn't work for some reason
-        Ok(Box::new(Self::new(device, config, source)?))
+        Ok(Box::new(Self::new(device, device_options, config, source)?))
     }
 
     fn stream_config(&self) -> SupportedStreamConfig {
@@ -197,13 +213,14 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         &self.device_info
     }
 
-    fn change_options(mut self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>> {
+    fn modify_options(mut self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>> {
         match options {
             // if the format isn't changed, then the stream could be changed itself
             DeviceOptions {
-                sample_rate,
                 sample_format: None,
+                sample_rate,
                 channels,
+                ..
             } => {
                 if let Some(sample_rate) = sample_rate {
                     self.device_info.sample_rate = sample_rate;
@@ -216,7 +233,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
             }
             // if the format is changed, then the entire device has to be changed because of
             // generics
-            options => Cpal.start(self.device_info.apply(options), self.source),
+            options => Cpal.start(self.device_options.merge(options), self.source),
         }
     }
 }

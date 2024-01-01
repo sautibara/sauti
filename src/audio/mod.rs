@@ -95,7 +95,26 @@ pub trait Device {
 
     fn info(&self) -> &DeviceInfo;
 
-    fn change_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>>;
+    /// Add onto the current options with `options` and restart the current device.
+    ///
+    /// # Errors
+    ///
+    /// - If the new options don't work, then [`AudioError::StreamConfigNotSupported`] will be
+    /// raised
+    /// - If some other error occured while [restarting](Self::restart)
+    fn modify_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>>;
+    /// Add onto the current options with `options` and restart the current device
+    ///
+    /// If the new options don't work, then the old options will be used instead
+    ///
+    /// # Errors
+    ///
+    /// - If the old options don't work anymore
+    /// - If some other error occured while [restarting](Self::restart)
+    fn try_modify_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>> {
+        let info = self.info().clone();
+        self.modify_options(options.append_backup(info))
+    }
 }
 
 /// A source for sound played on a device
@@ -214,17 +233,40 @@ impl DeviceInfo {
 ///
 /// If an option is not given, then the default config will be used for it. This includes the
 /// device itself: it will always use the default output device.
+///
+/// # Backups
+///
+/// - If this option doesn't work, then backups will be tried one by one until one works.
+/// - If none work, then [`AudioError::DeviceOptionsNotSupported`] will be raised.
+/// - To use the default if none work, then call [`Self::with_default_as_backup`]
 #[derive(Default, Debug, Clone)]
 // TODO: builder pattern
 pub struct DeviceOptions {
     pub sample_rate: Option<u32>,
     pub sample_format: Option<SampleFormat>,
     pub channels: Option<u16>,
+    // yes this is a linked list
+    pub backup: Option<Box<Self>>,
 }
 
 impl DeviceOptions {
     pub fn is_empty(&self) -> bool {
         self.sample_rate.is_none() && self.sample_format.is_none() && self.channels.is_none()
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            sample_rate: other.sample_rate.or(self.sample_rate),
+            sample_format: other.sample_format.or(self.sample_format),
+            channels: other.channels.or(self.channels),
+            // append the other options' backups to this
+            backup: match (self.backup, other.backup) {
+                (Some(own), Some(other)) => Some(Box::new(own.append_backup(*other))),
+                (Some(own), None) => Some(own),
+                (None, Some(other)) => Some(other),
+                (None, None) => None,
+            },
+        }
     }
 
     pub fn with_sample_rate(self, rate: u32) -> Self {
@@ -244,6 +286,30 @@ impl DeviceOptions {
     pub fn with_channel_count(self, channels: u16) -> Self {
         Self {
             channels: Some(channels),
+            ..self
+        }
+    }
+
+    pub fn with_backup(self, backup: impl Into<Self>) -> Self {
+        Self {
+            backup: Some(Box::new(backup.into())),
+            ..self
+        }
+    }
+
+    pub fn with_default_as_backup(self) -> Self {
+        self.with_backup(Self::default())
+    }
+
+    pub fn append_backup(self, new: impl Into<Self>) -> Self {
+        let new = new.into();
+        let backup = match self.backup {
+            Some(backup) => backup.append_backup(new),
+            None => new,
+        };
+
+        Self {
+            backup: Some(Box::new(backup)),
             ..self
         }
     }
@@ -268,6 +334,13 @@ impl DeviceOptions {
             ..self
         }
     }
+
+    pub fn remove_backup(self) -> Self {
+        Self {
+            backup: None,
+            ..self
+        }
+    }
 }
 
 impl From<DeviceInfo> for DeviceOptions {
@@ -276,6 +349,7 @@ impl From<DeviceInfo> for DeviceOptions {
             sample_rate: Some(info.sample_rate),
             sample_format: Some(info.sample_format),
             channels: Some(info.channels),
+            backup: None,
         }
     }
 }

@@ -1,11 +1,25 @@
-use sauti::audio::{Audio, ConvertibleSample, DeviceInfo, DeviceOptions, SoundSource};
+use sauti::audio::{
+    Audio, ConvertibleSample, DeviceInfo, DeviceOptions, SampleFormat, SoundSource,
+};
 
 // this program outputs a 440.0 hz sin wave on the main device
 fn main() {
     let audio = sauti::audio::default();
-    let _device = audio
+    let device = audio
         .start(DeviceOptions::default(), Beep { frequency: 440.0 })
         .expect("failed to start outputting sound");
+
+    // wait for something in the console, ignore it, and then exit
+    std::io::stdin()
+        .read_line(&mut String::new())
+        .expect("failed to read stdin");
+
+    // change the default device options
+    let device = device
+        .try_modify_options(DeviceOptions::default().with_sample_format(SampleFormat::F64))
+        .expect("failed to change device options");
+
+    println!("{:?}", device.info());
 
     // wait for something in the console, ignore it, and then exit
     std::io::stdin()
