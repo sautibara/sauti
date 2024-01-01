@@ -80,7 +80,7 @@ pub trait Audio {
     // TODO: allow devices other than the default device (probably in DeviceOptions)
     fn start<S: SoundSource>(
         &self,
-        options: DeviceOptions,
+        options: impl Into<DeviceOptions>,
         source: S,
     ) -> AudioResult<Box<dyn Device>>;
 }
@@ -95,7 +95,7 @@ pub trait Device {
 
     fn info(&self) -> &DeviceInfo;
 
-    fn change_sample_rate(&mut self, new: u32) -> AudioResult<()>;
+    fn change_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>>;
 }
 
 /// A source for sound played on a device
@@ -200,6 +200,14 @@ impl DeviceInfo {
     pub fn with_channel_count(self, channels: u16) -> Self {
         Self { channels, ..self }
     }
+
+    pub fn apply(self, options: DeviceOptions) -> Self {
+        Self {
+            sample_rate: options.sample_rate.unwrap_or(self.sample_rate),
+            sample_format: options.sample_format.unwrap_or(self.sample_format),
+            channels: options.channels.unwrap_or(self.channels),
+        }
+    }
 }
 
 /// Desired options for a sound device
@@ -277,13 +285,13 @@ impl From<DeviceInfo> for DeviceOptions {
 pub enum AudioError {
     #[error("no devices found")]
     NoDevicesFound,
-    #[error("device {0} no longer exists")]
+    #[error("device '{0}' no longer exists")]
     DeviceNotAvailable(String),
-    #[error("device {0} doesn't support output")]
+    #[error("device '{0}' doesn't support output")]
     DeviceNoOutput(String),
-    #[error("device {device} does not support config: {config:?}")]
-    StreamConfigNotSupported {
-        config: DeviceOptions,
+    #[error("device '{device}' does not support options: {options:?}")]
+    DeviceOptionsNotSupported {
+        options: DeviceOptions,
         device: String,
     },
     #[error("backend error: {0}")]
