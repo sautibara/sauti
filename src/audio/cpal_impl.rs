@@ -48,7 +48,10 @@ impl Cpal {
         // there is a config supported
         if let Some(best) = best {
             // TODO: try merging default options first
-            Ok(best.with_max_sample_rate())
+            let sample_rate = (options.sample_rate)
+                .map(cpal::SampleRate)
+                .unwrap_or_else(|| best.max_sample_rate());
+            Ok(best.with_sample_rate(sample_rate))
         // try backup config
         } else if let Some(backup) = options.backup.as_ref() {
             Self::find_config(device, backup)
@@ -128,7 +131,11 @@ impl Audio for Cpal {
 }
 
 pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
-    source: B,
+    /// The original sound source of the device
+    ///
+    /// If this is None, then the device is invalidated - it is only set to it when using
+    /// Device::inner_modify_options
+    source: Option<B>,
     stream: cpal::Stream,
     device: cpal::Device,
     /// The original options used to create this device
@@ -157,7 +164,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             .map_err(|err| play_stream_error(err, &device))?;
 
         Ok(Self {
-            source,
+            source: Some(source),
             stream,
             device,
             device_options,
@@ -189,8 +196,13 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
 
 impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
     fn restart(&mut self) -> AudioResult<()> {
-        let stream =
-            Cpal::create_stream::<S, B>(&self.device, &self.stream_config(), &self.source)?;
+        let stream = Cpal::create_stream::<S, B>(
+            &self.device,
+            &self.stream_config(),
+            self.source
+                .as_ref()
+                .expect("tried to restart device after it has already been used to create another"),
+        )?;
         self.stream = stream; // old stream drops and disconnects
 
         // start the stream again
@@ -213,7 +225,10 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         &self.device_info
     }
 
-    fn modify_options(mut self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>> {
+    fn inner_modify_options(
+        &mut self,
+        options: DeviceOptions,
+    ) -> AudioResult<Option<Box<dyn Device>>> {
         match options {
             // if the format isn't changed, then the stream could be changed itself
             DeviceOptions {
@@ -229,11 +244,16 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
                     self.device_info.channels = channels;
                 }
                 self.restart()?;
-                Ok(self)
+                Ok(None)
             }
             // if the format is changed, then the entire device has to be changed because of
             // generics
-            options => Cpal.start(self.device_options.merge(options), self.source),
+            options => Cpal
+                .start(
+                    std::mem::take(&mut self.device_options).merge(options),
+                    self.source.take().expect("tried to modify a device's options after it had already been used to create a new device"),
+                )
+                .map(Some),
         }
     }
 }

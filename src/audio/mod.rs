@@ -65,6 +65,33 @@ pub fn default() -> impl Audio {
     cpal_impl::Cpal
 }
 
+/// Add onto `device`'s current options with `options` and then restart it.
+///
+/// # Errors
+///
+/// - If the new options don't work, then [`AudioError::StreamConfigNotSupported`] will be
+/// raised
+/// - If some other error occured while [restarting](Self::restart)
+pub fn modify_options(device: &mut Box<dyn Device>, options: DeviceOptions) -> AudioResult<()> {
+    #[allow(deprecated)] // the deprecation is just used to disuade using it elsewhere
+    if let Some(new_device) = device.inner_modify_options(options)? {
+        *device = new_device;
+    }
+    Ok(())
+}
+
+/// Add onto `device`'s current options with `options` and then restart it.
+///
+/// If the new options don't work, then the old options will be used instead
+///
+/// # Errors
+///
+/// - If the old options don't work anymore
+/// - If some other error occured while [restarting](Self::restart)
+pub fn try_modify_options(device: &mut Box<dyn Device>, options: DeviceOptions) -> AudioResult<()> {
+    modify_options(device, options.append_backup(device.info().clone()))
+}
+
 /// A low-level interface for outputting audio
 ///
 /// Sound is started using the [start](Self::start) method
@@ -95,26 +122,16 @@ pub trait Device {
 
     fn info(&self) -> &DeviceInfo;
 
-    /// Add onto the current options with `options` and restart the current device.
+    /// Calling this could invalidate the device, see [`crate::audio::modify_options`] instead
     ///
-    /// # Errors
-    ///
-    /// - If the new options don't work, then [`AudioError::StreamConfigNotSupported`] will be
-    /// raised
-    /// - If some other error occured while [restarting](Self::restart)
-    fn modify_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>>;
-    /// Add onto the current options with `options` and restart the current device
-    ///
-    /// If the new options don't work, then the old options will be used instead
-    ///
-    /// # Errors
-    ///
-    /// - If the old options don't work anymore
-    /// - If some other error occured while [restarting](Self::restart)
-    fn try_modify_options(self: Box<Self>, options: DeviceOptions) -> AudioResult<Box<dyn Device>> {
-        let info = self.info().clone();
-        self.modify_options(options.append_backup(info))
-    }
+    /// Tries to modify the options in this device. If the device's options can't be changed without
+    /// creating a new device, then a new device is created and returned. `modify_options` handles
+    /// changing out the device if necessary.
+    #[deprecated = "Calling this could invalidate the device if not careful, see crate::audio::modify_options instead"]
+    fn inner_modify_options(
+        &mut self,
+        options: DeviceOptions,
+    ) -> AudioResult<Option<Box<dyn Device>>>;
 }
 
 /// A source for sound played on a device
@@ -157,6 +174,18 @@ pub trait SoundSource: 'static {
         &self,
         context: DeviceInfo,
     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static; // thank you 1.75
+}
+
+/// Source that only outputs silence
+pub struct Silence;
+
+impl SoundSource for Silence {
+    fn build<S: ConvertibleSample>(
+        &self,
+        _: DeviceInfo,
+    ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+        |channels| channels.fill(S::EQUILIBRIUM)
+    }
 }
 
 /// Supertrait of [`SizedSample`] and conversions from all others

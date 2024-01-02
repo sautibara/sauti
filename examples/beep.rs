@@ -5,7 +5,7 @@ use sauti::audio::{
 // this program outputs a 440.0 hz sin wave on the main device
 fn main() {
     let audio = sauti::audio::default();
-    let device = audio
+    let mut device = audio
         .start(DeviceOptions::default(), Beep { frequency: 440.0 })
         .expect("failed to start outputting sound");
 
@@ -15,9 +15,11 @@ fn main() {
         .expect("failed to read stdin");
 
     // change the default device options
-    let device = device
-        .try_modify_options(DeviceOptions::default().with_sample_format(SampleFormat::F64))
-        .expect("failed to change device options");
+    sauti::audio::try_modify_options(
+        &mut device,
+        DeviceOptions::default().with_sample_format(SampleFormat::F64),
+    )
+    .expect("failed to change device options");
 
     println!("{:?}", device.info());
 
