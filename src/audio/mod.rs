@@ -357,6 +357,13 @@ impl DeviceOptions {
     }
 
     with!( func_name: without_backup, field: backup, default: true );
+
+    /// Obtain an iterator over each potential option, including this one
+    pub fn iter(&self) -> DeviceOptionIterator<'_> {
+        DeviceOptionIterator {
+            current: Some(self),
+        }
+    }
 }
 
 impl From<DeviceInfo> for DeviceOptions {
@@ -367,6 +374,24 @@ impl From<DeviceInfo> for DeviceOptions {
             channels: Some(info.channels),
             backup: None,
         }
+    }
+}
+
+pub struct DeviceOptionIterator<'a> {
+    current: Option<&'a DeviceOptions>,
+}
+
+impl<'a> Iterator for DeviceOptionIterator<'a> {
+    type Item = &'a DeviceOptions;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current;
+        // stabilize Option::inspect soon plsss
+        if let Some(current) = current {
+            let after = current.backup.as_deref();
+            self.current = after;
+        }
+        current
     }
 }
 

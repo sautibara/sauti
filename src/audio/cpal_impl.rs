@@ -1,4 +1,4 @@
-use cpal::{SupportedStreamConfig, SupportedStreamConfigRange};
+use cpal::{SampleRate, SupportedStreamConfig, SupportedStreamConfigRange};
 
 use super::{
     Audio, AudioError, AudioResult, ConvertibleSample, Device, DeviceInfo, DeviceOptions,
@@ -13,12 +13,84 @@ fn is_none_or_eq<T: PartialEq<T>>(opt: Option<T>, val: T) -> bool {
     opt.is_none() || opt.is_some_and(|opt| opt == val)
 }
 
+fn sample_rate_within_range(rate: u32, range: &SupportedStreamConfigRange) -> bool {
+    rate >= range.min_sample_rate().0 && rate <= range.max_sample_rate().0
+}
+
 fn options_supports(options: &DeviceOptions, config: &SupportedStreamConfigRange) -> bool {
     is_none_or_eq(options.sample_format, config.sample_format())
         && is_none_or_eq(options.channels, config.channels())
         && is_none_or(options.sample_rate, |rate| {
-            rate > config.min_sample_rate().0 && rate < config.max_sample_rate().0
+            sample_rate_within_range(rate, config)
         })
+}
+
+fn apply_options(
+    options: &DeviceOptions,
+    config: &cpal::SupportedStreamConfig,
+) -> cpal::SupportedStreamConfig {
+    SupportedStreamConfig::new(
+        options.channels.unwrap_or_else(|| config.channels()),
+        options
+            .sample_rate
+            .map(SampleRate)
+            .unwrap_or_else(|| config.sample_rate()),
+        config.buffer_size().clone(),
+        options
+            .sample_format
+            .unwrap_or_else(|| config.sample_format()),
+    )
+}
+
+fn with_best_sample_rate(
+    range: SupportedStreamConfigRange,
+    options: &DeviceOptions,
+) -> Option<SupportedStreamConfig> {
+    let rate = if let Some(rate) = options.sample_rate {
+        // if the sample rate doesn't match, then return None
+        sample_rate_within_range(rate, &range).then_some(rate)?
+    } else if sample_rate_within_range(44100, &range) {
+        44100
+    } else {
+        range.max_sample_rate().0
+    };
+
+    Some(range.with_sample_rate(SampleRate(rate)))
+}
+
+struct SupportedConfig {
+    ranges: Vec<SupportedStreamConfigRange>,
+}
+
+impl SupportedConfig {
+    fn device_supports(device: &cpal::Device, config: &SupportedStreamConfig) -> AudioResult<bool> {
+        Ok(Self::from_device(device)?.supports_config(config))
+    }
+
+    fn from_device(device: &cpal::Device) -> AudioResult<Self> {
+        Ok(Self {
+            ranges: device
+                .supported_output_configs()
+                .map_err(|err| supported_configs_error(err, device))?
+                .collect(),
+        })
+    }
+
+    fn supports_config(&self, config: &SupportedStreamConfig) -> bool {
+        self.ranges.iter().any(|option| {
+            option.channels() == config.channels()
+                && option.sample_format() == config.sample_format()
+                && sample_rate_within_range(config.sample_rate().0, option)
+        })
+    }
+
+    fn best_with_options(self, options: &DeviceOptions) -> Option<SupportedStreamConfig> {
+        self.ranges
+            .into_iter()
+            .filter(|config| options_supports(options, config))
+            .max_by(|a, b| a.cmp_default_heuristics(b))
+            .and_then(|range| with_best_sample_rate(range, options))
+    }
 }
 
 pub struct Cpal;
@@ -29,39 +101,61 @@ impl Cpal {
             .ok_or(AudioError::NoDevicesFound)
     }
 
+    fn default_config(device: &cpal::Device) -> AudioResult<cpal::SupportedStreamConfig> {
+        device
+            .default_output_config()
+            .map_err(|err| default_stream_config_error(err, device))
+    }
+
     fn find_config(
         device: &cpal::Device,
         options: &DeviceOptions,
     ) -> AudioResult<cpal::SupportedStreamConfig> {
-        if options.is_empty() {
-            return device
-                .default_output_config()
-                .map_err(|err| default_stream_config_error(err, device));
-        }
+        // get the default config for the options to reference
+        let default = Self::default_config(device)?;
 
-        let best = device
-            .supported_output_configs()
-            .map_err(|err| supported_configs_error(err, device))?
-            .filter(|config| options_supports(options, config))
-            .max_by(|a, b| a.cmp_default_heuristics(b));
+        // find the first working config or error
+        let val = (options.iter())
+            .map(|options| Self::find_config_single(device, options, &default))
+            // take only results that are Err or Some
+            .filter_map(|config| config.transpose())
+            .nth(0);
 
-        // there is a config supported
-        if let Some(best) = best {
-            // TODO: try merging default options first
-            let sample_rate = (options.sample_rate)
-                .map(cpal::SampleRate)
-                .unwrap_or_else(|| best.max_sample_rate());
-            Ok(best.with_sample_rate(sample_rate))
-        // try backup config
-        } else if let Some(backup) = options.backup.as_ref() {
-            Self::find_config(device, backup)
-        // it's not supported
-        } else {
-            Err(AudioError::DeviceOptionsNotSupported {
+        // if there are no options, then return an error
+        let Some(val) = val else {
+            return Err(AudioError::DeviceOptionsNotSupported {
                 options: options.clone(),
                 device: device.name()?,
-            })
+            });
+        };
+
+        // this can also return an error if found
+        val
+    }
+
+    fn find_config_single(
+        device: &cpal::Device,
+        options: &DeviceOptions,
+        default: &cpal::SupportedStreamConfig,
+    ) -> AudioResult<Option<cpal::SupportedStreamConfig>> {
+        // if there are no options, then just use the default
+        if options.is_empty() {
+            return Ok(Some(default.clone()));
         }
+
+        // find the supported config to check against
+        let supported_config = SupportedConfig::from_device(device)?;
+
+        // check the given options + the device's default options
+        let default_with_options = apply_options(options, default);
+        if supported_config.supports_config(&default_with_options) {
+            return Ok(Some(default_with_options));
+        }
+
+        // check only the given options + any others
+        let best = supported_config.best_with_options(options);
+
+        Ok(best)
     }
 
     fn create_stream<S: ConvertibleSample, B: SoundSource>(
