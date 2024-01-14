@@ -48,11 +48,14 @@
 //! }
 //! ```
 
+use std::ops::Deref;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp_sample::FromSample;
 use thiserror::Error;
 
 mod cpal_impl;
+pub mod prelude;
 
 /// An enum representing the acceptable sound sample types
 pub use cpal::SampleFormat;
@@ -63,33 +66,6 @@ pub use cpal::SizedSample;
 #[must_use]
 pub fn default() -> impl Audio {
     cpal_impl::Cpal
-}
-
-/// Add onto `device`'s current options with `options` and then restart it.
-///
-/// # Errors
-///
-/// - If the new options don't work, then [`AudioError::StreamConfigNotSupported`] will be
-/// raised
-/// - If some other error occured while [restarting](Self::restart)
-pub fn modify_options(device: &mut Box<dyn Device>, options: DeviceOptions) -> AudioResult<()> {
-    #[allow(deprecated)] // the deprecation is just used to disuade using it elsewhere
-    if let Some(new_device) = device.inner_modify_options(options)? {
-        *device = new_device;
-    }
-    Ok(())
-}
-
-/// Add onto `device`'s current options with `options` and then restart it.
-///
-/// If the new options don't work, then the old options will be used instead
-///
-/// # Errors
-///
-/// - If the old options don't work anymore
-/// - If some other error occured while [restarting](Self::restart)
-pub fn try_modify_options(device: &mut Box<dyn Device>, options: DeviceOptions) -> AudioResult<()> {
-    modify_options(device, options.append_backup(device.info().clone()))
 }
 
 /// A low-level interface for outputting audio
@@ -114,7 +90,9 @@ pub trait Audio {
 
 /// A currently running stream on a sound device
 ///
-/// When [dropped](std::mem::drop), the stream will be stopped
+/// When [dropped](std::mem::drop), the stream will be stopped.
+///
+/// Check [`DeviceExt`] for more methods
 pub trait Device {
     fn restart(&mut self) -> AudioResult<()>;
     fn play(&mut self) -> AudioResult<()>;
@@ -122,16 +100,49 @@ pub trait Device {
 
     fn info(&self) -> &DeviceInfo;
 
-    /// Calling this could invalidate the device, see [`crate::audio::modify_options`] instead
+    /// Calling this could invalidate the device, see [`DeviceExt::merge_options`] instead
     ///
     /// Tries to modify the options in this device. If the device's options can't be changed without
-    /// creating a new device, then a new device is created and returned. `modify_options` handles
-    /// changing out the device if necessary.
-    #[deprecated = "Calling this could invalidate the device if not careful, see crate::audio::modify_options instead"]
+    /// creating a new device, then a new device is created and returned. `merge_options` handles
+    /// changing out the device if necessary (and dropping the old one), which is why it's suggested.
+    #[deprecated = "Calling this could invalidate the device if not careful, see DeviceExt::merge_options instead"]
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
     ) -> AudioResult<Option<Box<dyn Device>>>;
+}
+
+/// Methods specific to a [`Device`] trait object ([`Box<dyn Device>`])
+pub trait DeviceExt: Deref<Target = dyn Device> {
+    /// Add onto this device's current options with `options` and then restart.
+    ///
+    /// # Errors
+    ///
+    /// - If the new options don't work, then [`AudioError::DeviceOptionsNotSupported`] will be
+    /// raised
+    /// - Other errors can occur while [restarting](Device::restart)
+    fn merge_options(&mut self, options: DeviceOptions) -> AudioResult<()>;
+    /// Add onto this device's current options with `options` and then restart.
+    ///
+    /// If the new options don't work, then the old options will be used instead
+    ///
+    /// # Errors
+    ///
+    /// - If the old options don't work anymore
+    /// - Other errors can occur while [restarting](Device::restart)
+    fn try_merge_options(&mut self, options: DeviceOptions) -> AudioResult<()> {
+        self.merge_options(options.with_backup(self.info().clone()))
+    }
+}
+
+impl DeviceExt for Box<dyn Device> {
+    fn merge_options(&mut self, options: DeviceOptions) -> AudioResult<()> {
+        #[allow(deprecated)] // the deprecation is just used to disuade using it elsewhere
+        if let Some(new_device) = self.inner_modify_options(options)? {
+            *self = new_device;
+        }
+        Ok(())
+    }
 }
 
 /// A source for sound played on a device
@@ -267,7 +278,7 @@ impl DeviceInfo {
 ///
 /// - If this option doesn't work, then backups will be tried one by one until one works.
 /// - If none work, then [`AudioError::DeviceOptionsNotSupported`] will be raised.
-/// - To use the default if none work, then call [`Self::with_default_as_backup`]
+/// - To use the default options if no others work, then call [`Self::with_default_as_backup`]
 #[derive(Default, Debug, Clone)]
 // TODO: builder pattern
 pub struct DeviceOptions {
@@ -276,6 +287,28 @@ pub struct DeviceOptions {
     pub channels: Option<u16>,
     // yes this is a linked list
     pub backup: Option<Box<Self>>,
+}
+
+/// Implements a with_<field> method for a builder
+macro_rules! with {
+    // Default version ($field is set to None)
+    ( func_name: $func_name:ident, field: $field:ident, default: true ) => {
+        pub fn $func_name(self) -> Self {
+            Self {
+                $field: None,
+                ..self
+            }
+        }
+    };
+    // Normal version ($field is set to Some($field))
+    ( func_name: $func_name:ident, field: $field:ident, typ: $typ:ty ) => {
+        pub fn $func_name(self, $field: $typ) -> Self {
+            Self {
+                $field: Some($field),
+                ..self
+            }
+        }
+    };
 }
 
 impl DeviceOptions {
@@ -290,7 +323,7 @@ impl DeviceOptions {
             channels: other.channels.or(self.channels),
             // append the other options' backups to this
             backup: match (self.backup, other.backup) {
-                (Some(own), Some(other)) => Some(Box::new(own.append_backup(*other))),
+                (Some(own), Some(other)) => Some(Box::new(own.with_backup(*other))),
                 (Some(own), None) => Some(own),
                 (None, Some(other)) => Some(other),
                 (None, None) => None,
@@ -298,78 +331,32 @@ impl DeviceOptions {
         }
     }
 
-    pub fn with_sample_rate(self, rate: u32) -> Self {
-        Self {
-            sample_rate: Some(rate),
-            ..self
-        }
-    }
-
-    pub fn with_sample_format(self, format: SampleFormat) -> Self {
-        Self {
-            sample_format: Some(format),
-            ..self
-        }
-    }
-
-    pub fn with_channel_count(self, channels: u16) -> Self {
-        Self {
-            channels: Some(channels),
-            ..self
-        }
-    }
-
-    pub fn with_backup(self, backup: impl Into<Self>) -> Self {
-        Self {
-            backup: Some(Box::new(backup.into())),
-            ..self
-        }
-    }
+    with!( func_name: with_sample_rate, field: sample_rate, typ: u32 );
+    with!( func_name: with_sample_format, field: sample_format, typ: SampleFormat );
+    with!( func_name: with_channel_count, field: channels, typ: u16 );
+    with!( func_name: with_default_sample_rate, field: sample_rate, default: true );
+    with!( func_name: with_default_sample_format, field: sample_format, default: true );
+    with!( func_name: with_default_channel_count, field: channels, default: true );
 
     pub fn with_default_as_backup(self) -> Self {
         self.with_backup(Self::default())
     }
 
-    pub fn append_backup(self, new: impl Into<Self>) -> Self {
-        let new = new.into();
-        let backup = match self.backup {
-            Some(backup) => backup.append_backup(new),
-            None => new,
+    /// Append backup to the backup list
+    pub fn with_backup(self, backup: impl Into<Self>) -> Self {
+        let backup = backup.into();
+        let new_backup = match self.backup {
+            Some(current) => current.with_backup(backup),
+            None => backup,
         };
 
         Self {
-            backup: Some(Box::new(backup)),
+            backup: Some(Box::new(new_backup)),
             ..self
         }
     }
 
-    pub fn with_default_sample_rate(self) -> Self {
-        Self {
-            sample_rate: None,
-            ..self
-        }
-    }
-
-    pub fn with_default_sample_format(self) -> Self {
-        Self {
-            sample_format: None,
-            ..self
-        }
-    }
-
-    pub fn with_default_channel_count(self) -> Self {
-        Self {
-            channels: None,
-            ..self
-        }
-    }
-
-    pub fn remove_backup(self) -> Self {
-        Self {
-            backup: None,
-            ..self
-        }
-    }
+    with!( func_name: without_backup, field: backup, default: true );
 }
 
 impl From<DeviceInfo> for DeviceOptions {

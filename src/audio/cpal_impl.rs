@@ -237,6 +237,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
                 channels,
                 ..
             } => {
+                // FIXME: this doesn't check if the new config is supported
                 if let Some(sample_rate) = sample_rate {
                     self.device_info.sample_rate = sample_rate;
                 }

@@ -1,12 +1,16 @@
-use sauti::audio::{
-    Audio, ConvertibleSample, DeviceInfo, DeviceOptions, SampleFormat, SoundSource,
-};
+use sauti::audio::prelude::*;
 
 // this program outputs a 440.0 hz sin wave on the main device
 fn main() {
     let audio = sauti::audio::default();
     let mut device = audio
-        .start(DeviceOptions::default(), Beep { frequency: 440.0 })
+        .start(
+            DeviceOptions::default(),
+            Beep {
+                frequency: 220.0,
+                volume: 0.5,
+            },
+        )
         .expect("failed to start outputting sound");
 
     // wait for something in the console, ignore it, and then exit
@@ -15,11 +19,9 @@ fn main() {
         .expect("failed to read stdin");
 
     // change the default device options
-    sauti::audio::try_modify_options(
-        &mut device,
-        DeviceOptions::default().with_sample_format(SampleFormat::F64),
-    )
-    .expect("failed to change device options");
+    device
+        .try_merge_options(DeviceOptions::default().with_sample_format(SampleFormat::F64))
+        .expect("failed to change device options");
 
     println!("{:?}", device.info());
 
@@ -31,6 +33,7 @@ fn main() {
 
 struct Beep {
     frequency: f64,
+    volume: f64,
 }
 
 impl SoundSource for Beep {
@@ -41,6 +44,7 @@ impl SoundSource for Beep {
     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
         // config from the source can be passed in
         let frequency = self.frequency;
+        let volume = self.volume;
         // and internal variables can be initialized outside the closure
         let mut clock = 0;
 
@@ -51,7 +55,7 @@ impl SoundSource for Beep {
             let val =
                 (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
             // S::from_sample must be used to convert the f64 value to the generic sample type
-            channels.fill(S::from_sample(val * 0.1));
+            channels.fill(S::from_sample(val * volume));
         }
     }
 }
