@@ -5,6 +5,8 @@ use super::{
     DeviceTrait, HostTrait, SampleFormat, SizedSample, SoundSource, StreamTrait,
 };
 
+// options stuff //
+
 fn is_none_or<T>(opt: Option<T>, predicate: impl FnOnce(T) -> bool) -> bool {
     opt.is_none() || opt.is_some_and(predicate)
 }
@@ -63,10 +65,6 @@ struct SupportedConfig {
 }
 
 impl SupportedConfig {
-    fn device_supports(device: &cpal::Device, config: &SupportedStreamConfig) -> AudioResult<bool> {
-        Ok(Self::from_device(device)?.supports_config(config))
-    }
-
     fn from_device(device: &cpal::Device) -> AudioResult<Self> {
         Ok(Self {
             ranges: device
@@ -84,6 +82,10 @@ impl SupportedConfig {
         })
     }
 
+    fn supports_options(&self, options: &DeviceOptions) -> bool {
+        (self.ranges.iter()).any(|config| options_supports(options, config))
+    }
+
     fn best_with_options(self, options: &DeviceOptions) -> Option<SupportedStreamConfig> {
         self.ranges
             .into_iter()
@@ -91,7 +93,19 @@ impl SupportedConfig {
             .max_by(|a, b| a.cmp_default_heuristics(b))
             .and_then(|range| with_best_sample_rate(range, options))
     }
+
+    fn first_supported(
+        &self,
+        options: impl IntoIterator<Item = DeviceOptions>,
+    ) -> Option<DeviceOptions> {
+        options
+            .into_iter()
+            .filter(|options| self.supports_options(options))
+            .nth(0)
+    }
 }
+
+// actual cpal stuff //
 
 pub struct Cpal;
 
@@ -225,15 +239,10 @@ impl Audio for Cpal {
 }
 
 pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
-    /// The original sound source of the device
-    ///
-    /// If this is None, then the device is invalidated - it is only set to it when using
-    /// Device::inner_modify_options
-    source: Option<B>,
+    /// The original options that were used to make this device
+    dna: Option<DeviceDna<B>>,
     stream: cpal::Stream,
     device: cpal::Device,
-    /// The original options used to create this device
-    device_options: DeviceOptions,
     /// Information about the current stream
     device_info: DeviceInfo,
     /// The buffer size allowed for the current stream
@@ -241,6 +250,14 @@ pub struct CpalDevice<S: ConvertibleSample, B: SoundSource> {
     // a marker to the sample this device is using
     // cpal expects this sample type when creating the stream
     sample_marker: std::marker::PhantomData<S>,
+}
+
+/// Original options that are used to make a device
+pub struct DeviceDna<B: SoundSource> {
+    /// The original sound source of the device
+    source: B,
+    /// The original device options used to create this device
+    device_options: DeviceOptions,
 }
 
 impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
@@ -258,10 +275,12 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             .map_err(|err| play_stream_error(err, &device))?;
 
         Ok(Self {
-            source: Some(source),
+            dna: Some(DeviceDna {
+                source,
+                device_options,
+            }),
             stream,
             device,
-            device_options,
             buffer_size: config.buffer_size().clone(),
             device_info: config.into(),
             sample_marker: std::marker::PhantomData,
@@ -288,15 +307,13 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
     }
 }
 
+const DNA_ERROR: &str =
+    "device skeletons that are modified and used to create a new device should not be able to be used to create another device";
+
 impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
     fn restart(&mut self) -> AudioResult<()> {
-        let stream = Cpal::create_stream::<S, B>(
-            &self.device,
-            &self.stream_config(),
-            self.source
-                .as_ref()
-                .expect("tried to restart device after it has already been used to create another"),
-        )?;
+        let dna = self.dna.as_ref().expect(DNA_ERROR);
+        let stream = Cpal::create_stream::<S, B>(&self.device, &self.stream_config(), &dna.source)?;
         self.stream = stream; // old stream drops and disconnects
 
         // start the stream again
@@ -323,33 +340,48 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         &mut self,
         options: DeviceOptions,
     ) -> AudioResult<Option<Box<dyn Device>>> {
-        match options {
-            // if the format isn't changed, then the stream could be changed itself
-            DeviceOptions {
-                sample_format: None,
-                sample_rate,
-                channels,
-                ..
-            } => {
-                // FIXME: this doesn't check if the new config is supported
-                if let Some(sample_rate) = sample_rate {
-                    self.device_info.sample_rate = sample_rate;
-                }
-                if let Some(channels) = channels {
-                    self.device_info.channels = channels;
-                }
-                self.restart()?;
-                Ok(None)
-            }
-            // if the format is changed, then the entire device has to be changed because of
-            // generics
-            options => Cpal
-                .start(
-                    std::mem::take(&mut self.device_options).merge(options),
-                    self.source.take().expect("tried to modify a device's options after it had already been used to create a new device"),
-                )
-                .map(Some),
+        let mut dna = self.dna.take().expect(DNA_ERROR);
+        let supported_config = SupportedConfig::from_device(&self.device)?;
+
+        // find first supported device options
+        let new_options = supported_config.first_supported(
+            options
+                .iter()
+                .map(|option| dna.device_options.simple_merge(option)),
+        );
+
+        // if there are none, then return an error
+        let Some(new_options) = new_options else {
+            return Err(AudioError::DeviceOptionsNotSupported {
+                options: dna.device_options.merge(options),
+                device: self.device.name()?,
+            });
+        };
+
+        // if the options change the sample format, then
+        // a new device has to be made because of generics
+        if new_options.sample_format.is_some() {
+            return Cpal.start(new_options, dna.source).map(Some);
         }
+
+        // otherwise, edit the current device
+
+        // update device info
+        if let Some(sample_rate) = new_options.sample_rate {
+            self.device_info.sample_rate = sample_rate;
+        }
+        if let Some(channels) = new_options.channels {
+            self.device_info.channels = channels;
+        }
+
+        // put back the dna
+        dna.device_options = new_options;
+        self.dna = Some(dna);
+
+        // restart the device
+        self.restart()?;
+        // a new device did not need to be made
+        Ok(None)
     }
 }
 

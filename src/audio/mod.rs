@@ -316,6 +316,7 @@ impl DeviceOptions {
         self.sample_rate.is_none() && self.sample_format.is_none() && self.channels.is_none()
     }
 
+    /// Merge `other`'s options onto `self`
     pub fn merge(self, other: Self) -> Self {
         Self {
             sample_rate: other.sample_rate.or(self.sample_rate),
@@ -328,6 +329,16 @@ impl DeviceOptions {
                 (None, Some(other)) => Some(other),
                 (None, None) => None,
             },
+        }
+    }
+
+    /// Merge `other`'s options onto `self`, ignoring backups
+    pub fn simple_merge(&self, other: &Self) -> Self {
+        Self {
+            sample_rate: other.sample_rate.or(self.sample_rate),
+            sample_format: other.sample_format.or(self.sample_format),
+            channels: other.channels.or(self.channels),
+            backup: None,
         }
     }
 
