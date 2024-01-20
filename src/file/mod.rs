@@ -1,4 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::{
+    cmp::Ordering,
+    convert::identity,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use dasp_sample::FromSample;
 use thiserror::Error;
@@ -113,11 +118,11 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         self.spec.sample_rate
     }
 
-    pub fn frames(&self) -> usize {
+    pub fn frame_count(&self) -> usize {
         self.interleaved_samples().len() / self.channels()
     }
 
-    pub fn samples(&self) -> impl Iterator<Item = &[S]> {
+    pub fn frames(&self) -> impl DoubleEndedIterator<Item = &[S]> {
         self.interleaved_samples.chunks_exact(self.channels())
     }
 
@@ -130,7 +135,85 @@ impl<S: ConvertibleSample> SoundPacket<S> {
             channel < self.channels(),
             "accessed channel index shouldn't be more than the amount of channels in the packet"
         );
-        self.samples().map(move |channels| &channels[channel])
+        self.frames().map(move |channels| &channels[channel])
+    }
+
+    pub fn resize_and_map_channels<F>(mut self, to_channels: usize, mut map: F) -> Self
+    where
+        F: FnMut(&mut [S], usize, usize),
+    {
+        let from_channels = self.channels();
+        match to_channels.cmp(&from_channels) {
+            // if the channels don't have to be resized, just map them
+            Ordering::Equal => {
+                self.map_frames(&mut map, from_channels, to_channels);
+            }
+            // there are less channels than before, so they're getting compressed
+            Ordering::Less => {
+                // map the frames now because they'll get compressed later
+                self.map_frames(&mut map, from_channels, to_channels);
+                // move each sample sequentually because they'll get less room
+                self.move_samples_for_resize(from_channels, to_channels, identity);
+                // resize the sample vector to the new, smaller size
+                self.resize_to_fit_channels(to_channels);
+            }
+            // there are more channels than before, so they're getting expanded
+            Ordering::Greater => {
+                // resize the sample vector to fit the extra space
+                self.resize_to_fit_channels(to_channels);
+                // move each sample in reverse to not overwrite upcoming frames
+                self.move_samples_for_resize(from_channels, to_channels, |iter| iter.rev());
+                // map the frames now because they have the extra room
+                self.map_frames(&mut map, from_channels, to_channels);
+            }
+        }
+        // everything else is the same
+        self
+    }
+
+    fn resize_to_fit_channels(&mut self, to_channels: usize) {
+        self.interleaved_samples
+            .resize(to_channels * self.frame_count(), S::EQUILIBRIUM);
+        // the amount of channels are changed now
+        self.spec.channels = to_channels;
+    }
+
+    fn map_frames<F>(&mut self, map: &mut F, from_channels: usize, to_channels: usize)
+    where
+        F: FnMut(&mut [S], usize, usize),
+    {
+        let frames = self.frame_count();
+        let channels = self.channels();
+        for frame in 0..frames {
+            let frame_index = frame * channels;
+            map(
+                &mut self.interleaved_samples[frame_index..frame_index + channels],
+                from_channels,
+                to_channels,
+            );
+        }
+    }
+
+    fn move_samples_for_resize<O: Iterator<Item = usize>>(
+        &mut self,
+        from_channels: usize,
+        to_channels: usize,
+        // the iterators might have to be reversed if the space available is expanding
+        iter_map: impl Fn(Range<usize>) -> O,
+    ) {
+        let frames = self.frame_count();
+        // the amount of channels that will be copied
+        let copy_channels = from_channels.min(to_channels);
+        // go through each frame and copy over the channels
+        for frame in iter_map(0..frames) {
+            let from_frame = frame * from_channels;
+            let to_frame = frame * to_channels;
+            // copy over each channels
+            for channel in iter_map(0..copy_channels) {
+                self.interleaved_samples
+                    .swap(from_frame + channel, to_frame + channel);
+            }
+        }
     }
 
     pub fn convert<N: ConvertibleSample + FromSample<S>>(self) -> SoundPacket<N> {
