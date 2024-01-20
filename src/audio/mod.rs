@@ -52,6 +52,7 @@ use std::ops::Deref;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp_sample::FromSample;
+use dasp_sample::ToSample;
 use thiserror::Error;
 
 mod cpal_impl;
@@ -212,24 +213,47 @@ pub trait ConvertibleSample:
     + FromSample<u64>
     + FromSample<f32>
     + FromSample<f64>
+    + ToSample<i8>
+    + ToSample<i16>
+    + ToSample<i32>
+    + ToSample<i64>
+    + ToSample<u8>
+    + ToSample<u16>
+    + ToSample<u32>
+    + ToSample<u64>
+    + ToSample<f32>
+    + ToSample<f64>
+    + Send
+    + Sync
     + 'static
 {
 }
 
-impl<
-        T: SizedSample
-            + FromSample<i8>
-            + FromSample<i16>
-            + FromSample<i32>
-            + FromSample<i64>
-            + FromSample<u8>
-            + FromSample<u16>
-            + FromSample<u32>
-            + FromSample<u64>
-            + FromSample<f32>
-            + FromSample<f64>
-            + 'static,
-    > ConvertibleSample for T
+impl<T> ConvertibleSample for T where
+    T: SizedSample
+        + FromSample<i8>
+        + FromSample<i16>
+        + FromSample<i32>
+        + FromSample<i64>
+        + FromSample<u8>
+        + FromSample<u16>
+        + FromSample<u32>
+        + FromSample<u64>
+        + FromSample<f32>
+        + FromSample<f64>
+        + ToSample<i8>
+        + ToSample<i16>
+        + ToSample<i32>
+        + ToSample<i64>
+        + ToSample<u8>
+        + ToSample<u16>
+        + ToSample<u32>
+        + ToSample<u64>
+        + ToSample<f32>
+        + ToSample<f64>
+        + Send
+        + Sync
+        + 'static
 {
 }
 
