@@ -1,3 +1,8 @@
+// in essence, it will be very rare that either the channel count or sample rate will ever be
+// truncated
+// these are set to usize for easier arithmetic with things that use usize
+#![allow(clippy::cast_possible_truncation)]
+
 use cpal::{SampleRate, SupportedStreamConfig, SupportedStreamConfigRange};
 
 use crate::data::ConvertibleSample;
@@ -13,7 +18,7 @@ fn is_none_or<T>(opt: Option<T>, predicate: impl FnOnce(T) -> bool) -> bool {
     opt.is_none() || opt.is_some_and(predicate)
 }
 
-fn is_none_or_eq<T: PartialEq<T>>(opt: Option<T>, val: T) -> bool {
+fn is_none_or_eq<T: PartialEq<T>>(opt: Option<&T>, val: &T) -> bool {
     opt.is_none() || opt.is_some_and(|opt| opt == val)
 }
 
@@ -23,8 +28,8 @@ fn sample_rate_within_range(rate: usize, range: &SupportedStreamConfigRange) -> 
 }
 
 fn options_supports(options: &DeviceOptions, config: &SupportedStreamConfigRange) -> bool {
-    is_none_or_eq(options.sample_format, config.sample_format())
-        && is_none_or_eq(options.channels, config.channels() as usize)
+    is_none_or_eq(options.sample_format.as_ref(), &config.sample_format())
+        && is_none_or_eq(options.channels.as_ref(), &(config.channels() as usize))
         && is_none_or(options.sample_rate, |rate| {
             sample_rate_within_range(rate, config)
         })
@@ -37,12 +42,10 @@ fn apply_options(
     SupportedStreamConfig::new(
         options
             .channels
-            .map(|x| x as u16)
-            .unwrap_or_else(|| config.channels()),
+            .map_or_else(|| config.channels(), |x| x as u16),
         options
             .sample_rate
-            .map(|rate| SampleRate(rate as u32))
-            .unwrap_or_else(|| config.sample_rate()),
+            .map_or_else(|| config.sample_rate(), |rate| SampleRate(rate as u32)),
         config.buffer_size().clone(),
         options
             .sample_format
@@ -96,7 +99,7 @@ impl SupportedConfig {
         self.ranges
             .into_iter()
             .filter(|config| options_supports(options, config))
-            .max_by(|a, b| a.cmp_default_heuristics(b))
+            .max_by(SupportedStreamConfigRange::cmp_default_heuristics)
             .and_then(|range| with_best_sample_rate(range, options))
     }
 
@@ -138,7 +141,7 @@ impl Cpal {
         let val = (options.iter())
             .map(|options| Self::find_config_single(device, options, &default))
             // take only results that are Err or Some
-            .filter_map(|config| config.transpose())
+            .filter_map(Result::transpose)
             .nth(0);
 
         // if there are no options, then return an error

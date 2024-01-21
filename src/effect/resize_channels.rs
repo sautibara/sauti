@@ -32,11 +32,13 @@ impl ResizeChannels {
                 .expect("reduce on a non-empty iterator should always return something")
                 // bring it back to the original sample type
                 .to_sample::<S>();
+            // it's very unlikely that there will be more channels than a u32 could handle
+            #[allow(clippy::cast_possible_truncation)]
             let amount = S::from_sample(from_channels as u32);
             (sum.to_float_sample() / amount.to_float_sample()).to_sample::<S>()
         };
         // fill the chnnels with the average
-        frame.fill(average)
+        frame.fill(average);
     }
 }
 

@@ -1,12 +1,16 @@
+// TODO: actually measure the performance of the inlining
+#![allow(clippy::inline_always)]
+
 use crate::data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
 
 // TODO: resampler using rubato
 
-mod channels;
 mod optional;
+mod resize_channels;
 mod volume;
-pub use channels::*;
-pub use optional::*;
+pub use optional::Handle as OptionalHandle;
+pub use optional::Optional;
+pub use resize_channels::*;
 pub use volume::Volume;
 
 pub trait Effect: Clone + Send + Sync + 'static {
@@ -52,12 +56,12 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
     }
 }
 
-pub trait EffectGeneric {
+pub trait Generic {
     fn apply_to_generic(&mut self, input: GenericPacket, output_spec: &StreamSpec)
         -> GenericPacket;
 }
 
-impl<E: Effect> EffectGeneric for E {
+impl<E: Effect> Generic for E {
     fn apply_to_generic(
         &mut self,
         input: GenericPacket,

@@ -1,10 +1,10 @@
 use std::path::Path;
 
 use sauti::{
-    audio::{prelude::DeviceInfo, Audio, DeviceOptions, SoundSource},
-    data::*,
+    audio::{Audio, DeviceInfo, DeviceOptions, SoundSource},
+    data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec},
     decoder::{Decoder, DecoderResult},
-    effect::{Effect, EffectGeneric, ResizeChannels, Volume},
+    effect::{Effect, Generic, ResizeChannels, Volume},
 };
 
 use crossbeam_channel::Receiver;

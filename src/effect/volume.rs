@@ -11,6 +11,7 @@ use dasp_sample::Sample;
 pub struct Volume(pub Handle);
 
 impl Volume {
+    #[must_use]
     pub fn create_handle(initial: f32) -> Handle {
         Handle::new(initial)
     }

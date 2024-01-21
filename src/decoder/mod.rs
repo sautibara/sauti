@@ -8,15 +8,27 @@ mod symphonia;
 
 pub use symphonia::Symphonia;
 
+#[must_use]
 pub fn default() -> impl Decoder {
     Symphonia::default()
 }
 
 pub trait Decoder {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
+    ///
+    /// # Errors
+    ///
+    /// - If there is some error with IO
+    /// - If there is a backend-specific error
     fn read_fallible(&self, file: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>>;
 
     /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
+    ///
+    /// # Errors
+    ///
+    /// - If the format isn't supported
+    /// - If there is an error with IO
+    /// - If there is a backend-specific error
     fn read(&self, file: &Path) -> DecoderResult<Box<dyn AudioStream>> {
         self.read_fallible(file)
             .transpose()
@@ -25,6 +37,11 @@ pub trait Decoder {
 }
 
 pub trait AudioStream {
+    /// # Errors
+    ///
+    /// - If there is an error found while decoding
+    /// - If there is an error with IO
+    /// - If there is a backend-specific error
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>>;
 }
 
@@ -34,12 +51,13 @@ pub struct List {
 }
 
 impl List {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn with(&mut self, decoder: impl Decoder + 'static) {
-        self.decoders.push(Box::new(decoder))
+        self.decoders.push(Box::new(decoder));
     }
 }
 
@@ -55,6 +73,8 @@ impl Decoder for List {
 }
 
 #[derive(Error, Debug)]
+// see [`crate::audio::AudioError`] for justification
+#[allow(clippy::module_name_repetitions)]
 pub enum DecoderError {
     #[error("format of file '{0}' is not supported")]
     UnsupportedFormat(PathBuf),
@@ -77,4 +97,6 @@ impl From<std::io::Error> for DecoderError {
     }
 }
 
+// see [`crate::audio::AudioError`] for justification
+#[allow(clippy::module_name_repetitions)]
 pub type DecoderResult<T> = Result<T, DecoderError>;

@@ -95,8 +95,21 @@ pub trait Audio {
 ///
 /// Check [`DeviceExt`] for more methods
 pub trait Device {
+    /// # Errors
+    ///
+    /// - If the device has been invalidated due to a call of [`Self::inner_modify_options`]
+    /// - If the device is not available anymore
+    /// - Other backend-specific errors
     fn restart(&mut self) -> AudioResult<()>;
+    /// # Errors
+    ///
+    /// - If the device is not available anymore
+    /// - Other backend-specific errors
     fn play(&mut self) -> AudioResult<()>;
+    /// # Errors
+    ///
+    /// - If the device is not available anymore
+    /// - Other backend-specific errors
     fn pause(&mut self) -> AudioResult<()>;
 
     fn info(&self) -> &DeviceInfo;
@@ -106,6 +119,11 @@ pub trait Device {
     /// Tries to modify the options in this device. If the device's options can't be changed without
     /// creating a new device, then a new device is created and returned. `merge_options` handles
     /// changing out the device if necessary (and dropping the old one), which is why it's suggested.
+    ///
+    /// # Errors
+    ///
+    /// - If the device has already been invalidated due to a previous call
+    /// - Any other errors in [`Self::restart`]
     #[deprecated = "Calling this could invalidate the device if not careful, see DeviceExt::merge_options instead"]
     fn inner_modify_options(
         &mut self,
@@ -209,25 +227,29 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    pub fn with_sample_rate(self, sample_rate: usize) -> Self {
+    #[must_use]
+    pub const fn with_sample_rate(self, sample_rate: usize) -> Self {
         Self {
             sample_rate,
             ..self
         }
     }
 
-    pub fn with_sample_format(self, sample_format: SampleFormat) -> Self {
+    #[must_use]
+    pub const fn with_sample_format(self, sample_format: SampleFormat) -> Self {
         Self {
             sample_format,
             ..self
         }
     }
 
-    pub fn with_channel_count(self, channels: usize) -> Self {
+    #[must_use]
+    pub const fn with_channel_count(self, channels: usize) -> Self {
         Self { channels, ..self }
     }
 
-    pub fn apply(self, options: DeviceOptions) -> Self {
+    #[must_use]
+    pub fn apply(self, options: &DeviceOptions) -> Self {
         Self {
             sample_rate: options.sample_rate.unwrap_or(self.sample_rate),
             sample_format: options.sample_format.unwrap_or(self.sample_format),
@@ -247,7 +269,7 @@ impl DeviceInfo {
 /// - If none work, then [`AudioError::DeviceOptionsNotSupported`] will be raised.
 /// - To use the default options if no others work, then call [`Self::with_default_as_backup`]
 #[derive(Default, Debug, Clone)]
-// TODO: builder pattern
+#[must_use]
 pub struct DeviceOptions {
     pub sample_rate: Option<usize>,
     pub sample_format: Option<SampleFormat>,
@@ -279,7 +301,8 @@ macro_rules! with {
 }
 
 impl DeviceOptions {
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.sample_rate.is_none() && self.sample_format.is_none() && self.channels.is_none()
     }
 
@@ -337,7 +360,18 @@ impl DeviceOptions {
     with!( func_name: without_backup, field: backup, default: true );
 
     /// Obtain an iterator over each potential option, including this one
-    pub fn iter(&self) -> DeviceOptionIterator<'_> {
+    #[must_use]
+    pub const fn iter(&self) -> DeviceOptionIterator<'_> {
+        DeviceOptionIterator {
+            current: Some(self),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a DeviceOptions {
+    type Item = &'a DeviceOptions;
+    type IntoIter = DeviceOptionIterator<'a>;
+    fn into_iter(self) -> Self::IntoIter {
         DeviceOptionIterator {
             current: Some(self),
         }
@@ -375,6 +409,8 @@ impl<'a> Iterator for DeviceOptionIterator<'a> {
 
 /// Some errors that can be encountered while interacting with audio
 #[derive(Error, Debug)]
+// there's a good few errors from different modules, so adding names here makes sense
+#[allow(clippy::module_name_repetitions)]
 pub enum AudioError {
     #[error("no devices found")]
     NoDevicesFound,
@@ -395,4 +431,6 @@ pub enum AudioError {
     UnrecognizedSampleFormat(SampleFormat),
 }
 
+// see [`crate::audio::AudioError`] for justification
+#[allow(clippy::module_name_repetitions)]
 type AudioResult<T> = Result<T, AudioError>;

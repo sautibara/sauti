@@ -132,11 +132,11 @@ impl<'a> From<AudioBufferRef<'a>> for GenericPacket {
         match value {
             AudioBufferRef::U8(buffer) => Self::U8(buffer.deref().into()),
             AudioBufferRef::U16(buffer) => Self::U16(buffer.deref().into()),
-            AudioBufferRef::U24(_) => todo!(),
+            AudioBufferRef::U24(_) => todo!("implement U24 and S24 in samples"),
             AudioBufferRef::U32(buffer) => Self::U32(buffer.deref().into()),
             AudioBufferRef::S8(buffer) => Self::I8(buffer.deref().into()),
             AudioBufferRef::S16(buffer) => Self::I16(buffer.deref().into()),
-            AudioBufferRef::S24(_) => todo!(),
+            AudioBufferRef::S24(_) => todo!("implement U24 and S24 in samples"),
             AudioBufferRef::S32(buffer) => Self::I32(buffer.deref().into()),
             AudioBufferRef::F32(buffer) => Self::F32(buffer.deref().into()),
             AudioBufferRef::F64(buffer) => Self::F64(buffer.deref().into()),

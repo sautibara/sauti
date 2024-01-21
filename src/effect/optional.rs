@@ -10,12 +10,12 @@ use super::Effect;
 #[derive(Clone)]
 pub struct Optional<E: Effect> {
     pub current: E,
-    pub handle: OptionalHandle,
+    pub handle: Handle,
 }
 
 impl<E: Effect> Optional<E> {
-    pub fn new(effect: E, activated: bool) -> (Self, OptionalHandle) {
-        let handle = OptionalHandle::new(activated);
+    pub fn new(effect: E, activated: bool) -> (Self, Handle) {
+        let handle = Handle::new(activated);
         (
             Self {
                 current: effect,
@@ -25,7 +25,7 @@ impl<E: Effect> Optional<E> {
         )
     }
 
-    pub fn with_handle(effect: E, handle: OptionalHandle) -> Self {
+    pub const fn with_handle(effect: E, handle: Handle) -> Self {
         Self {
             current: effect,
             handle,
@@ -34,13 +34,15 @@ impl<E: Effect> Optional<E> {
 }
 
 #[derive(Clone)]
-pub struct OptionalHandle(Arc<AtomicBool>);
+pub struct Handle(Arc<AtomicBool>);
 
-impl OptionalHandle {
+impl Handle {
+    #[must_use]
     pub fn new(activated: bool) -> Self {
         Self(Arc::new(AtomicBool::new(activated)))
     }
 
+    #[must_use]
     pub fn is_activated(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
