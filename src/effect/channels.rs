@@ -9,6 +9,7 @@ use crate::{
 
 use super::Effect;
 
+#[derive(Clone)]
 pub struct ResizeChannels;
 
 impl ResizeChannels {
@@ -43,7 +44,7 @@ impl ResizeChannels {
 }
 
 impl Effect for ResizeChannels {
-    fn apply<S: ConvertibleSample>(
+    fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,
         output_spec: &StreamSpec,

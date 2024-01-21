@@ -10,6 +10,7 @@ use crate::{
 
 use super::Effect;
 
+#[derive(Clone)]
 pub struct Optional<E: Effect> {
     pub current: E,
     pub handle: OptionalHandle,
@@ -62,13 +63,13 @@ impl OptionalHandle {
 
 impl<E: Effect> Effect for Optional<E> {
     #[inline(always)]
-    fn apply<S: ConvertibleSample>(
+    fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,
         output_spec: &StreamSpec,
     ) -> SoundPacket<S> {
         if self.handle.is_activated() {
-            self.current.apply(input, output_spec)
+            self.current.apply_to(input, output_spec)
         } else {
             input
         }
