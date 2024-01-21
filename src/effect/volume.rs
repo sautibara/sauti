@@ -8,11 +8,11 @@ use atomic_float::AtomicF32;
 use dasp_sample::Sample;
 
 #[derive(Clone)]
-pub struct Volume(pub VolumeHandle);
+pub struct Volume(pub Handle);
 
 impl Volume {
-    pub fn create_handle(initial: f32) -> VolumeHandle {
-        VolumeHandle::new(initial)
+    pub fn create_handle(initial: f32) -> Handle {
+        Handle::new(initial)
     }
 }
 
@@ -28,9 +28,9 @@ impl Effect for Volume {
 }
 
 #[derive(Clone)]
-pub struct VolumeHandle(Arc<AtomicF32>);
+pub struct Handle(Arc<AtomicF32>);
 
-impl VolumeHandle {
+impl Handle {
     pub fn new(initial: f32) -> Self {
         Self(Arc::new(AtomicF32::new(initial)))
     }

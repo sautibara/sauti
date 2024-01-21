@@ -15,7 +15,7 @@ use symphonia::core::{
 
 use crate::data::{ConvertibleSample, GenericPacket, SoundPacket};
 
-use super::{AudioStream, Decoder, FileError, FileResult};
+use super::{AudioStream, Decoder, DecoderError, DecoderResult};
 
 pub struct Symphonia {
     probe: Probe,
@@ -39,7 +39,7 @@ impl Decoder for Symphonia {
     fn read_fallible(
         &self,
         path: &std::path::Path,
-    ) -> super::FileResult<Option<Box<dyn super::AudioStream>>> {
+    ) -> super::DecoderResult<Option<Box<dyn super::AudioStream>>> {
         let source = Box::new(File::open(path)?);
         let source = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
 
@@ -60,7 +60,7 @@ impl Decoder for Symphonia {
             .map_err(|err| map_error_with_path(err, path));
 
         // if the format is unsupported, then return None to signify it
-        if matches!(format_result, Err(FileError::UnsupportedFormat(_))) {
+        if matches!(format_result, Err(DecoderError::UnsupportedFormat(_))) {
             return Ok(None);
         }
 
@@ -70,7 +70,7 @@ impl Decoder for Symphonia {
         // get the default track
         let track = (reader.format)
             .default_track()
-            .ok_or_else(|| FileError::NoTracks(path.to_owned()))?;
+            .ok_or_else(|| DecoderError::NoTracks(path.to_owned()))?;
 
         // try to decode the track
         let decode_result = self
@@ -79,7 +79,7 @@ impl Decoder for Symphonia {
             .map_err(|err| map_error_with_path(err, path));
 
         // if the codec is unsupported, then return None to signify it
-        if matches!(decode_result, Err(FileError::UnsupportedFormat(_))) {
+        if matches!(decode_result, Err(DecoderError::UnsupportedFormat(_))) {
             return Ok(None);
         }
 
@@ -104,7 +104,7 @@ struct Stream {
 }
 
 impl AudioStream for Stream {
-    fn next_packet(&mut self) -> FileResult<Option<GenericPacket>> {
+    fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
         let undecoded_packet = self.file.next_packet();
         if is_end_of_stream(&undecoded_packet) {
             return Ok(None);
@@ -156,16 +156,18 @@ impl<S: ConvertibleSample + SymphoniaSample> From<&AudioBuffer<S>> for SoundPack
 }
 
 use symphonia::core::errors::Error as SymphoniaError;
-fn map_error_with_path(error: SymphoniaError, path: &Path) -> FileError {
+fn map_error_with_path(error: SymphoniaError, path: &Path) -> DecoderError {
     match error {
-        SymphoniaError::IoError(error) => FileError::IoError(error),
-        SymphoniaError::DecodeError(reason) => FileError::MalformedData {
+        SymphoniaError::IoError(error) => DecoderError::IoError(error),
+        SymphoniaError::DecodeError(reason) => DecoderError::MalformedData {
             path: path.to_owned(),
             reason: Some(reason.to_string()),
         },
         SymphoniaError::SeekError(_) => unimplemented!("decoder never seeks"),
-        SymphoniaError::Unsupported(_) => FileError::UnsupportedFormat(path.to_owned()),
-        SymphoniaError::LimitError(error) => FileError::Other(Some(error.to_string())),
-        SymphoniaError::ResetRequired => FileError::Other(Some("decoder needs reset".to_string())),
+        SymphoniaError::Unsupported(_) => DecoderError::UnsupportedFormat(path.to_owned()),
+        SymphoniaError::LimitError(error) => DecoderError::Other(Some(error.to_string())),
+        SymphoniaError::ResetRequired => {
+            DecoderError::Other(Some("decoder needs reset".to_string()))
+        }
     }
 }

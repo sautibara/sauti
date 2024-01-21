@@ -8,43 +8,43 @@ mod symphonia;
 
 pub use symphonia::Symphonia;
 
-pub fn default_decoder() -> impl Decoder {
+pub fn default() -> impl Decoder {
     Symphonia::default()
 }
 
 pub trait Decoder {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
-    fn read_fallible(&self, file: &Path) -> FileResult<Option<Box<dyn AudioStream>>>;
+    fn read_fallible(&self, file: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>>;
 
     /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
-    fn read(&self, file: &Path) -> FileResult<Box<dyn AudioStream>> {
+    fn read(&self, file: &Path) -> DecoderResult<Box<dyn AudioStream>> {
         self.read_fallible(file)
             .transpose()
-            .unwrap_or(Err(FileError::UnsupportedFormat(file.to_owned())))
+            .unwrap_or(Err(DecoderError::UnsupportedFormat(file.to_owned())))
     }
 }
 
 pub trait AudioStream {
-    fn next_packet(&mut self) -> FileResult<Option<GenericPacket>>;
+    fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>>;
 }
 
 #[derive(Default)]
-pub struct DecoderList {
+pub struct List {
     decoders: Vec<Box<dyn Decoder>>,
 }
 
-impl DecoderList {
+impl List {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_decoder(&mut self, decoder: impl Decoder + 'static) {
+    pub fn with(&mut self, decoder: impl Decoder + 'static) {
         self.decoders.push(Box::new(decoder))
     }
 }
 
-impl Decoder for DecoderList {
-    fn read_fallible(&self, file: &Path) -> FileResult<Option<Box<dyn AudioStream>>> {
+impl Decoder for List {
+    fn read_fallible(&self, file: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>> {
         for decoder in &self.decoders {
             if let Some(stream) = decoder.read_fallible(file)? {
                 return Ok(Some(stream));
@@ -55,7 +55,7 @@ impl Decoder for DecoderList {
 }
 
 #[derive(Error, Debug)]
-pub enum FileError {
+pub enum DecoderError {
     #[error("format of file '{0}' is not supported")]
     UnsupportedFormat(PathBuf),
     #[error("io error: {0}")]
@@ -71,10 +71,10 @@ pub enum FileError {
     Other(Option<String>),
 }
 
-impl From<std::io::Error> for FileError {
+impl From<std::io::Error> for DecoderError {
     fn from(v: std::io::Error) -> Self {
         Self::IoError(v)
     }
 }
 
-pub type FileResult<T> = Result<T, FileError>;
+pub type DecoderResult<T> = Result<T, DecoderError>;

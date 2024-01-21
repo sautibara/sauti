@@ -7,7 +7,7 @@ mod optional;
 mod volume;
 pub use channels::*;
 pub use optional::*;
-pub use volume::*;
+pub use volume::Volume;
 
 pub trait Effect: Clone + Send + Sync + 'static {
     fn apply_to<S: ConvertibleSample>(

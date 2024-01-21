@@ -3,14 +3,14 @@ use std::path::Path;
 use sauti::{
     audio::{prelude::DeviceInfo, Audio, DeviceOptions, SoundSource},
     data::*,
+    decoder::{Decoder, DecoderResult},
     effect::{Effect, EffectGeneric, ResizeChannels, Volume},
-    file::{Decoder, FileResult},
 };
 
 use crossbeam_channel::Receiver;
 
 // NOTE: this is a proof of concept - not meant to be an example
-fn main() -> FileResult<()> {
+fn main() -> DecoderResult<()> {
     // decode the file given in the command line
     let path = std::env::args().nth(1).expect("usage: {command} {path}");
 
@@ -18,7 +18,7 @@ fn main() -> FileResult<()> {
     let (sender, reciever) = crossbeam_channel::unbounded();
     // decode the file in another thread
     let decoder_result = std::thread::spawn(move || {
-        let decoder = sauti::file::default_decoder();
+        let decoder = sauti::decoder::default();
         let mut stream = decoder.read(Path::new(&path))?;
 
         while (stream.next_packet()?)
