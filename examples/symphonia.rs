@@ -1,12 +1,12 @@
-use std::{ops::Add, path::Path};
+use std::path::Path;
 
-use dasp_sample::Sample;
 use sauti::{
     audio::{
         prelude::{ConvertibleSample, DeviceInfo},
         Audio, DeviceOptions, SoundSource,
     },
-    file::{Decoder, GenericPacket, SoundPacket},
+    effect::{Effect, EffectGeneric, OptionalHandle, ResizeChannels, Volume},
+    file::{Decoder, GenericPacket, SoundPacket, StreamSpec},
 };
 
 use crossbeam_channel::Receiver;
@@ -20,7 +20,11 @@ fn main() -> sauti::file::FileResult<()> {
 
     // set up a stream between the decoder and the audio output
     let (sender, reciever) = crossbeam_channel::unbounded();
-    let source = AudioStreamSource { reciever };
+    let volume_handle = OptionalHandle::new(true);
+    let source_volume_handle = volume_handle.clone();
+    let source = AudioStreamSource::new(reciever, move || {
+        ResizeChannels.then(Volume(0.1).activate_with_handle(source_volume_handle.clone()))
+    });
 
     // the audio output needs to start with a packet
     if let Some(packet) = stream.next_packet()? {
@@ -46,57 +50,74 @@ fn main() -> sauti::file::FileResult<()> {
         .read_line(&mut String::new())
         .expect("failed to read stdin");
 
+    volume_handle.deactivate();
+
+    std::io::stdin()
+        .read_line(&mut String::new())
+        .expect("failed to read stdin");
+
+    volume_handle.activate();
+
+    std::io::stdin()
+        .read_line(&mut String::new())
+        .expect("failed to read stdin");
+
     Ok(())
 }
 
 #[derive(Clone)]
-struct AudioStreamSource {
+struct AudioStreamSource<E, F>
+where
+    E: Effect,
+    F: Fn() -> E + 'static,
+{
+    reciever: AudioStreamReciever,
+    effect_builder: F,
+}
+
+impl<E, F> AudioStreamSource<E, F>
+where
+    E: Effect,
+    F: Fn() -> E + 'static,
+{
+    pub fn new(reciever: Receiver<GenericPacket>, effect_builder: F) -> Self {
+        Self {
+            reciever: AudioStreamReciever { reciever },
+            effect_builder,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AudioStreamReciever {
     reciever: Receiver<GenericPacket>,
 }
 
-impl AudioStreamSource {
-    fn next_packet<S: ConvertibleSample>(&self, to_channels: usize) -> SoundPacket<S> {
-        let packet = self.reciever.recv().unwrap().convert::<S>();
-        packet.resize_and_map_channels(to_channels, Self::map_channels)
-    }
-
-    fn map_channels<S: ConvertibleSample>(
-        frame: &mut [S],
-        from_channels: usize,
-        to_channels: usize,
-    ) {
-        // if the channels are already fine, then do nothing
-        if from_channels == to_channels || to_channels == 0 || frame.is_empty() {
-            return;
-        }
-        // find the average value of all of the channels
-        let average = if from_channels == 1 {
-            frame[0]
-        } else {
-            let sum = (frame.iter())
-                // only signed samples can multiply
-                .map(|sample| sample.to_signed_sample())
-                // Sample doesn't implement Sum, so use reduce instead
-                .reduce(Add::add)
-                // already checked `frame.is_empty()` above
-                .expect("reduce on a non-empty iterator should always return something")
-                // bring it back to the original sample type
-                .to_sample::<S>();
-            let amount = S::from_sample(from_channels as u32);
-            (sum.to_float_sample() / amount.to_float_sample()).to_sample::<S>()
-        };
-        // fill the channels with the average
-        frame.fill(average)
+impl AudioStreamReciever {
+    fn next_packet<S: ConvertibleSample>(
+        &self,
+        spec: &StreamSpec,
+        effects: &mut impl Effect,
+    ) -> SoundPacket<S> {
+        let packet = self.reciever.recv().unwrap();
+        let converted_packet = effects.apply_generic(packet, spec);
+        converted_packet.convert::<S>()
     }
 }
 
-impl SoundSource for AudioStreamSource {
+impl<E, F> SoundSource for AudioStreamSource<E, F>
+where
+    E: Effect,
+    F: Fn() -> E + 'static,
+{
     fn build<S: ConvertibleSample>(
         &self,
         info: DeviceInfo,
     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
-        let reciever = self.clone();
-        let mut current_packet = reciever.next_packet(info.channels as usize);
+        let reciever = self.reciever.clone();
+        let mut effects = (self.effect_builder)();
+        let spec = info.into();
+        let mut current_packet = reciever.next_packet(&spec, &mut effects);
         let mut current_index = 0;
         move |channels| {
             channels.copy_from_slice(
@@ -105,7 +126,7 @@ impl SoundSource for AudioStreamSource {
             );
             current_index += channels.len();
             if current_index >= current_packet.frame_count() * current_packet.channels() {
-                current_packet = reciever.next_packet(info.channels as usize);
+                current_packet = reciever.next_packet(&spec, &mut effects);
                 current_index = 0;
             }
         }

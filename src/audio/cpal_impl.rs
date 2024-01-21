@@ -15,13 +15,14 @@ fn is_none_or_eq<T: PartialEq<T>>(opt: Option<T>, val: T) -> bool {
     opt.is_none() || opt.is_some_and(|opt| opt == val)
 }
 
-fn sample_rate_within_range(rate: u32, range: &SupportedStreamConfigRange) -> bool {
+fn sample_rate_within_range(rate: usize, range: &SupportedStreamConfigRange) -> bool {
+    let rate = rate as u32;
     rate >= range.min_sample_rate().0 && rate <= range.max_sample_rate().0
 }
 
 fn options_supports(options: &DeviceOptions, config: &SupportedStreamConfigRange) -> bool {
     is_none_or_eq(options.sample_format, config.sample_format())
-        && is_none_or_eq(options.channels, config.channels())
+        && is_none_or_eq(options.channels, config.channels() as usize)
         && is_none_or(options.sample_rate, |rate| {
             sample_rate_within_range(rate, config)
         })
@@ -32,10 +33,13 @@ fn apply_options(
     config: &cpal::SupportedStreamConfig,
 ) -> cpal::SupportedStreamConfig {
     SupportedStreamConfig::new(
-        options.channels.unwrap_or_else(|| config.channels()),
+        options
+            .channels
+            .map(|x| x as u16)
+            .unwrap_or_else(|| config.channels()),
         options
             .sample_rate
-            .map(SampleRate)
+            .map(|rate| SampleRate(rate as u32))
             .unwrap_or_else(|| config.sample_rate()),
         config.buffer_size().clone(),
         options
@@ -50,7 +54,7 @@ fn with_best_sample_rate(
 ) -> Option<SupportedStreamConfig> {
     let rate = if let Some(rate) = options.sample_rate {
         // if the sample rate doesn't match, then return None
-        sample_rate_within_range(rate, &range).then_some(rate)?
+        sample_rate_within_range(rate, &range).then_some(rate as u32)?
     } else if sample_rate_within_range(44100, &range) {
         44100
     } else {
@@ -78,7 +82,7 @@ impl SupportedConfig {
         self.ranges.iter().any(|option| {
             option.channels() == config.channels()
                 && option.sample_format() == config.sample_format()
-                && sample_rate_within_range(config.sample_rate().0, option)
+                && sample_rate_within_range(config.sample_rate().0 as usize, option)
         })
     }
 
@@ -178,9 +182,9 @@ impl Cpal {
         source: &B,
     ) -> AudioResult<cpal::Stream> {
         let device_info = DeviceInfo {
-            sample_rate: config.sample_rate().0,
+            sample_rate: config.sample_rate().0 as usize,
             sample_format: config.sample_format(),
-            channels: config.channels(),
+            channels: config.channels() as usize,
         };
         let concrete_config = config.config();
         let channels = concrete_config.channels;
@@ -299,8 +303,8 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
 
     fn stream_config(&self) -> SupportedStreamConfig {
         SupportedStreamConfig::new(
-            self.device_info.channels,
-            cpal::SampleRate(self.device_info.sample_rate),
+            self.device_info.channels as u16,
+            cpal::SampleRate(self.device_info.sample_rate as u32),
             self.buffer_size.clone(),
             self.device_info.sample_format,
         )
@@ -388,9 +392,9 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
 impl From<SupportedStreamConfig> for DeviceInfo {
     fn from(value: SupportedStreamConfig) -> Self {
         Self {
-            sample_rate: value.sample_rate().0,
+            sample_rate: value.sample_rate().0 as usize,
             sample_format: value.sample_format(),
-            channels: value.channels(),
+            channels: value.channels() as usize,
         }
     }
 }

@@ -260,13 +260,13 @@ impl<T> ConvertibleSample for T where
 /// Information about the current sound device
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    pub sample_rate: u32,
+    pub sample_rate: usize,
     pub sample_format: SampleFormat,
-    pub channels: u16,
+    pub channels: usize,
 }
 
 impl DeviceInfo {
-    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
+    pub fn with_sample_rate(self, sample_rate: usize) -> Self {
         Self {
             sample_rate,
             ..self
@@ -280,7 +280,7 @@ impl DeviceInfo {
         }
     }
 
-    pub fn with_channel_count(self, channels: u16) -> Self {
+    pub fn with_channel_count(self, channels: usize) -> Self {
         Self { channels, ..self }
     }
 
@@ -306,9 +306,9 @@ impl DeviceInfo {
 #[derive(Default, Debug, Clone)]
 // TODO: builder pattern
 pub struct DeviceOptions {
-    pub sample_rate: Option<u32>,
+    pub sample_rate: Option<usize>,
     pub sample_format: Option<SampleFormat>,
-    pub channels: Option<u16>,
+    pub channels: Option<usize>,
     // yes this is a linked list
     pub backup: Option<Box<Self>>,
 }
@@ -366,9 +366,9 @@ impl DeviceOptions {
         }
     }
 
-    with!( func_name: with_sample_rate, field: sample_rate, typ: u32 );
+    with!( func_name: with_sample_rate, field: sample_rate, typ: usize );
     with!( func_name: with_sample_format, field: sample_format, typ: SampleFormat );
-    with!( func_name: with_channel_count, field: channels, typ: u16 );
+    with!( func_name: with_channel_count, field: channels, typ: usize );
     with!( func_name: with_default_sample_rate, field: sample_rate, default: true );
     with!( func_name: with_default_sample_format, field: sample_format, default: true );
     with!( func_name: with_default_channel_count, field: channels, default: true );

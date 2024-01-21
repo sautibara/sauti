@@ -8,7 +8,7 @@ use std::{
 use dasp_sample::FromSample;
 use thiserror::Error;
 
-use crate::audio::ConvertibleSample;
+use crate::audio::{ConvertibleSample, DeviceInfo};
 
 mod symphonia;
 
@@ -38,6 +38,15 @@ pub trait AudioStream {
 pub struct StreamSpec {
     pub channels: usize,
     pub sample_rate: usize,
+}
+
+impl From<DeviceInfo> for StreamSpec {
+    fn from(value: DeviceInfo) -> Self {
+        Self {
+            channels: value.channels,
+            sample_rate: value.sample_rate,
+        }
+    }
 }
 
 pub enum GenericPacket {
@@ -138,6 +147,36 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         self.frames().map(move |channels| &channels[channel])
     }
 
+    pub fn to_channels(&self) -> Vec<Vec<S>> {
+        let mut channels = vec![vec![S::EQUILIBRIUM; self.frame_count()]; self.channels()];
+        self.copy_to_channels(&mut channels);
+        channels
+    }
+
+    pub fn copy_to_channels(&self, channels: &mut Vec<Vec<S>>) {
+        let frame_count = self.frame_count();
+        let channel_count = self.channels();
+        // make sure there's enough channels in the output
+        if channels.len() < channel_count {
+            channels.resize(channel_count, vec![S::EQUILIBRIUM; frame_count]);
+        }
+        // and enough frames in each channel
+        for channel in channels
+            .iter_mut()
+            .filter(|channel| channel.len() < frame_count)
+        {
+            channel.resize(frame_count, S::EQUILIBRIUM)
+        }
+        // then copy over all of the samples
+        for frame in 0..self.frame_count() {
+            let frame_index = frame * channel_count;
+            let frame_slice = &self.interleaved_samples[frame_index..frame_index + channel_count];
+            for channel in 0..channel_count {
+                channels[channel][frame] = frame_slice[channel];
+            }
+        }
+    }
+
     pub fn resize_and_map_channels<F>(mut self, to_channels: usize, mut map: F) -> Self
     where
         F: FnMut(&mut [S], usize, usize),
@@ -226,6 +265,13 @@ impl<S: ConvertibleSample> SoundPacket<S> {
             interleaved_samples,
             spec: self.spec,
         }
+    }
+
+    pub fn map_samples(mut self, mut map: impl FnMut(&S) -> S) -> Self {
+        for sample in self.interleaved_samples.iter_mut() {
+            *sample = map(sample);
+        }
+        self
     }
 }
 
