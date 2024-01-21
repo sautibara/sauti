@@ -6,6 +6,11 @@ use crate::data::GenericPacket;
 
 mod symphonia;
 
+pub mod prelude {
+    pub use super::{AudioStream, Decoder, DecoderError, DecoderResult};
+    pub use crate::data::prelude::*;
+}
+
 pub use symphonia::Symphonia;
 
 #[must_use]

@@ -2,9 +2,7 @@ use std::ops::Add;
 
 use dasp_sample::Sample;
 
-use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
-
-use super::Effect;
+use super::prelude::*;
 
 #[derive(Clone)]
 pub struct ResizeChannels;

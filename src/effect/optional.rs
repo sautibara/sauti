@@ -3,9 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
-
-use super::Effect;
+use super::prelude::*;
 
 #[derive(Clone)]
 pub struct Optional<E: Effect> {

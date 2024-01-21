@@ -4,6 +4,10 @@ use crate::audio::DeviceInfo;
 
 pub use dasp_sample::{FromSample, Sample, ToSample};
 
+pub mod prelude {
+    pub use super::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
+}
+
 /// Supertrait of [`SizedSample`] and conversions from all others
 pub trait ConvertibleSample:
     cpal::SizedSample

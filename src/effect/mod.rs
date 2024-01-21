@@ -13,6 +13,12 @@ pub use optional::Optional;
 pub use resize_channels::*;
 pub use volume::Volume;
 
+pub mod prelude {
+    pub use super::{Effect, Generic as _};
+    pub use crate::data::prelude::*;
+    pub use crate::effect;
+}
+
 pub trait Effect: Clone + Send + Sync + 'static {
     fn apply_to<S: ConvertibleSample>(
         &mut self,

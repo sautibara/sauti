@@ -1,8 +1,6 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
-
-use super::Effect;
+use super::prelude::*;
 
 use atomic_float::AtomicF32;
 use dasp_sample::Sample;

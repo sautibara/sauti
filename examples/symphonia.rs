@@ -1,11 +1,6 @@
 use std::path::Path;
 
-use sauti::{
-    audio::{Audio, DeviceInfo, DeviceOptions, SoundSource},
-    data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec},
-    decoder::{Decoder, DecoderResult},
-    effect::{Effect, Generic, ResizeChannels, Volume},
-};
+use sauti::{audio::prelude::*, decoder::prelude::*, effect::prelude::*};
 
 use crossbeam_channel::Receiver;
 
@@ -31,7 +26,7 @@ fn main() -> DecoderResult<()> {
     });
 
     // set up a handle to activate or deactivate the volume
-    let volume_handle = Volume::create_handle(0.1);
+    let volume_handle = effect::Volume::create_handle(0.1);
 
     let _device = {
         // output audio (also in another thread)
@@ -42,7 +37,7 @@ fn main() -> DecoderResult<()> {
                 DeviceOptions::default().with_sample_rate(44100),
                 AudioStreamSource {
                     reciever,
-                    effects: ResizeChannels.then(Volume(volume_handle)),
+                    effects: effect::ResizeChannels.then(effect::Volume(volume_handle)),
                 },
             )
             .expect("failed to start outputting sound")

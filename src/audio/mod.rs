@@ -54,7 +54,14 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
 mod cpal_impl;
-pub mod prelude;
+
+pub mod prelude {
+    pub use super::{
+        Audio, AudioError, AudioResult, DeviceExt, DeviceInfo, DeviceOptions, SampleFormat,
+        SoundSource,
+    };
+    pub use crate::data::ConvertibleSample;
+}
 
 /// An enum representing the acceptable sound sample types
 pub use cpal::SampleFormat;
@@ -433,4 +440,4 @@ pub enum AudioError {
 
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
-type AudioResult<T> = Result<T, AudioError>;
+pub type AudioResult<T> = Result<T, AudioError>;
