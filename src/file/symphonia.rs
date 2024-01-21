@@ -13,9 +13,9 @@ use symphonia::core::{
     probe::{Hint, Probe},
 };
 
-use crate::audio::ConvertibleSample;
+use crate::data::{ConvertibleSample, GenericPacket, SoundPacket};
 
-use super::{AudioStream, Decoder, FileError, FileResult, GenericPacket, SoundPacket};
+use super::{AudioStream, Decoder, FileError, FileResult};
 
 pub struct Symphonia {
     probe: Probe,

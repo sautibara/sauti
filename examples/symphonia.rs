@@ -1,12 +1,10 @@
 use std::path::Path;
 
 use sauti::{
-    audio::{
-        prelude::{ConvertibleSample, DeviceInfo},
-        Audio, DeviceOptions, SoundSource,
-    },
+    audio::{prelude::DeviceInfo, Audio, DeviceOptions, SoundSource},
+    data::*,
     effect::{Effect, EffectGeneric, ResizeChannels, Volume},
-    file::{Decoder, FileResult, GenericPacket, SoundPacket, StreamSpec},
+    file::{Decoder, FileResult},
 };
 
 use crossbeam_channel::Receiver;
@@ -19,16 +17,14 @@ fn main() -> FileResult<()> {
     // set up a stream between the decoder and the audio output
     let (sender, reciever) = crossbeam_channel::unbounded();
     // decode the file in another thread
-    let val = std::thread::spawn(move || {
+    let decoder_result = std::thread::spawn(move || {
         let decoder = sauti::file::default_decoder();
         let mut stream = decoder.read(Path::new(&path))?;
 
-        while let Some(packet) = stream.next_packet()? {
-            if sender.send(packet).is_err() {
-                println!("device hung up :(");
-                return Ok(());
-            }
-        }
+        while (stream.next_packet()?)
+            .and_then(|packet| sender.send(packet).ok())
+            .is_some()
+        {}
 
         println!("finished!");
         Ok(())
@@ -68,8 +64,8 @@ fn main() -> FileResult<()> {
         .read_line(&mut String::new())
         .expect("failed to read stdin");
 
-    if val.is_finished() {
-        val.join().unwrap()
+    if decoder_result.is_finished() {
+        decoder_result.join().unwrap()
     } else {
         Ok(())
     }

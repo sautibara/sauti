@@ -2,10 +2,7 @@ use std::ops::Add;
 
 use dasp_sample::Sample;
 
-use crate::{
-    audio::ConvertibleSample,
-    file::{SoundPacket, StreamSpec},
-};
+use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
 
 use super::Effect;
 

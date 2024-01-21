@@ -1,3 +1,1 @@
-pub use super::{
-    Audio, ConvertibleSample, DeviceExt, DeviceInfo, DeviceOptions, SampleFormat, SoundSource,
-};
+pub use super::{Audio, DeviceExt, DeviceInfo, DeviceOptions, SampleFormat, SoundSource};

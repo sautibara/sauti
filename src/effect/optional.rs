@@ -3,10 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::{
-    audio::ConvertibleSample,
-    file::{SoundPacket, StreamSpec},
-};
+use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
 
 use super::Effect;
 

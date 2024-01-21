@@ -51,8 +51,6 @@
 use std::ops::Deref;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use dasp_sample::FromSample;
-use dasp_sample::ToSample;
 use thiserror::Error;
 
 mod cpal_impl;
@@ -62,6 +60,8 @@ pub mod prelude;
 pub use cpal::SampleFormat;
 /// A basic sound sample
 pub use cpal::SizedSample;
+
+use crate::data::ConvertibleSample;
 
 /// Find the default [`Audio`] handler
 #[must_use]
@@ -198,63 +198,6 @@ impl SoundSource for Silence {
     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
         |channels| channels.fill(S::EQUILIBRIUM)
     }
-}
-
-/// Supertrait of [`SizedSample`] and conversions from all others
-pub trait ConvertibleSample:
-    SizedSample
-    + FromSample<i8>
-    + FromSample<i16>
-    + FromSample<i32>
-    + FromSample<i64>
-    + FromSample<u8>
-    + FromSample<u16>
-    + FromSample<u32>
-    + FromSample<u64>
-    + FromSample<f32>
-    + FromSample<f64>
-    + ToSample<i8>
-    + ToSample<i16>
-    + ToSample<i32>
-    + ToSample<i64>
-    + ToSample<u8>
-    + ToSample<u16>
-    + ToSample<u32>
-    + ToSample<u64>
-    + ToSample<f32>
-    + ToSample<f64>
-    + Send
-    + Sync
-    + 'static
-{
-}
-
-impl<T> ConvertibleSample for T where
-    T: SizedSample
-        + FromSample<i8>
-        + FromSample<i16>
-        + FromSample<i32>
-        + FromSample<i64>
-        + FromSample<u8>
-        + FromSample<u16>
-        + FromSample<u32>
-        + FromSample<u64>
-        + FromSample<f32>
-        + FromSample<f64>
-        + ToSample<i8>
-        + ToSample<i16>
-        + ToSample<i32>
-        + ToSample<i64>
-        + ToSample<u8>
-        + ToSample<u16>
-        + ToSample<u32>
-        + ToSample<u64>
-        + ToSample<f32>
-        + ToSample<f64>
-        + Send
-        + Sync
-        + 'static
-{
 }
 
 /// Information about the current sound device

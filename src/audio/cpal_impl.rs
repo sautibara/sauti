@@ -1,8 +1,10 @@
 use cpal::{SampleRate, SupportedStreamConfig, SupportedStreamConfigRange};
 
+use crate::data::ConvertibleSample;
+
 use super::{
-    Audio, AudioError, AudioResult, ConvertibleSample, Device, DeviceInfo, DeviceOptions,
-    DeviceTrait, HostTrait, SampleFormat, SizedSample, SoundSource, StreamTrait,
+    Audio, AudioError, AudioResult, Device, DeviceInfo, DeviceOptions, DeviceTrait, HostTrait,
+    SampleFormat, SizedSample, SoundSource, StreamTrait,
 };
 
 // options stuff //

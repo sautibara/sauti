@@ -1,7 +1,4 @@
-use crate::{
-    audio::ConvertibleSample,
-    file::{GenericPacket, SoundPacket, StreamSpec},
-};
+use crate::data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
 
 // TODO: resampler using rubato
 

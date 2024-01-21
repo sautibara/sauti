@@ -1,9 +1,6 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use crate::{
-    audio::ConvertibleSample,
-    file::{SoundPacket, StreamSpec},
-};
+use crate::data::{ConvertibleSample, SoundPacket, StreamSpec};
 
 use super::Effect;
 
