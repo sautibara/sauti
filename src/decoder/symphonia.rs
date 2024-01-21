@@ -1,19 +1,15 @@
-use std::{
-    fs::File,
-    ops::Deref,
-    path::{Path, PathBuf},
-};
+use std::{fs::File, io::Cursor, ops::Deref};
 
 use symphonia::core::{
     audio::{AudioBuffer, AudioBufferRef, Signal},
     codecs::{CodecRegistry, DecoderOptions},
     formats::{FormatOptions, FormatReader},
-    io::{MediaSourceStream, MediaSourceStreamOptions},
+    io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
     probe::{Hint, Probe},
 };
 
-use super::prelude::*;
+use super::{prelude::*, Source};
 
 pub struct Symphonia {
     probe: Probe,
@@ -33,29 +29,24 @@ impl Default for Symphonia {
     }
 }
 
-impl Decoder for Symphonia {
-    fn read_fallible(
+impl Symphonia {
+    fn read_source(
         &self,
-        path: &std::path::Path,
-    ) -> super::DecoderResult<Option<Box<dyn super::AudioStream>>> {
-        let source = Box::new(File::open(path)?);
+        source: Box<dyn MediaSource>,
+        error_source: Source,
+        hint: &Hint,
+    ) -> DecoderResult<Option<Box<dyn AudioStream>>> {
         let source = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
-
-        let mut hint = Hint::new();
-        // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it does
-        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-            hint.with_extension(extension);
-        }
 
         // read the format of the file (but don't decode yet)
         let format_result = (self.probe)
             .format(
-                &hint,
+                hint,
                 source,
                 &FormatOptions::default(),
                 &MetadataOptions::default(),
             )
-            .map_err(|err| map_error_with_path(err, path));
+            .map_err(|err| map_error_with_source(err, &error_source));
 
         // if the format is unsupported, then return None to signify it
         if matches!(format_result, Err(DecoderError::UnsupportedFormat(_))) {
@@ -68,13 +59,13 @@ impl Decoder for Symphonia {
         // get the default track
         let track = (reader.format)
             .default_track()
-            .ok_or_else(|| DecoderError::NoTracks(path.to_owned()))?;
+            .ok_or_else(|| DecoderError::NoTracks(error_source.clone()))?;
 
         // try to decode the track
         let decode_result = self
             .codec_registry
             .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|err| map_error_with_path(err, path));
+            .map_err(|err| map_error_with_source(err, &error_source));
 
         // if the codec is unsupported, then return None to signify it
         if matches!(decode_result, Err(DecoderError::UnsupportedFormat(_))) {
@@ -85,7 +76,7 @@ impl Decoder for Symphonia {
         let decoder = decode_result?;
 
         let stream = Stream {
-            path: path.to_owned(),
+            error_source,
             file: reader.format,
             decoder,
         };
@@ -94,9 +85,32 @@ impl Decoder for Symphonia {
     }
 }
 
+impl Decoder for Symphonia {
+    fn read_fallible(
+        &self,
+        path: &std::path::Path,
+    ) -> super::DecoderResult<Option<Box<dyn super::AudioStream>>> {
+        let source = Box::new(File::open(path)?);
+
+        let mut hint = Hint::new();
+        // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it does
+        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+            hint.with_extension(extension);
+        }
+
+        self.read_source(source, Source::File(path.to_owned()), &hint)
+    }
+
+    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+        let buf: Box<[u8]> = buf.iter().copied().collect();
+        let source = Box::new(Cursor::new(buf));
+        self.read_source(source, Source::Buffer, &Hint::new())
+    }
+}
+
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;
 struct Stream {
-    path: PathBuf,
+    error_source: Source,
     file: Box<dyn FormatReader>,
     decoder: Box<dyn SymphoniaDecoder>,
 }
@@ -108,10 +122,10 @@ impl AudioStream for Stream {
             return Ok(None);
         }
         let undecoded_packet =
-            undecoded_packet.map_err(|err| map_error_with_path(err, &self.path))?;
+            undecoded_packet.map_err(|err| map_error_with_source(err, &self.error_source))?;
         let symphonia_packet = (self.decoder)
             .decode(&undecoded_packet)
-            .map_err(|err| map_error_with_path(err, &self.path))?;
+            .map_err(|err| map_error_with_source(err, &self.error_source))?;
         let packet = symphonia_packet.into();
         Ok(Some(packet))
     }
@@ -154,15 +168,15 @@ impl<S: ConvertibleSample + SymphoniaSample> From<&AudioBuffer<S>> for SoundPack
 }
 
 use symphonia::core::errors::Error as SymphoniaError;
-fn map_error_with_path(error: SymphoniaError, path: &Path) -> DecoderError {
+fn map_error_with_source(error: SymphoniaError, source: &Source) -> DecoderError {
     match error {
         SymphoniaError::IoError(error) => DecoderError::IoError(error),
         SymphoniaError::DecodeError(reason) => DecoderError::MalformedData {
-            path: path.to_owned(),
+            source: source.clone(),
             reason: Some(reason.to_string()),
         },
         SymphoniaError::SeekError(_) => unimplemented!("decoder never seeks"),
-        SymphoniaError::Unsupported(_) => DecoderError::UnsupportedFormat(path.to_owned()),
+        SymphoniaError::Unsupported(_) => DecoderError::UnsupportedFormat(source.clone()),
         SymphoniaError::LimitError(error) => DecoderError::Other(Some(error.to_string())),
         SymphoniaError::ResetRequired => {
             DecoderError::Other(Some("decoder needs reset".to_string()))

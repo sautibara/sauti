@@ -1,4 +1,15 @@
-use std::path::{Path, PathBuf};
+//! Decoding of audio files
+//!
+//! # Examples
+//!
+//! ```
+//! use sauti::decoder::prelude::*;
+//! ```
+
+use std::{
+    fmt::Debug,
+    path::{Path, PathBuf},
+};
 
 use thiserror::Error;
 
@@ -25,7 +36,15 @@ pub trait Decoder {
     ///
     /// - If there is some error with IO
     /// - If there is a backend-specific error
-    fn read_fallible(&self, file: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>>;
+    fn read_fallible(&self, path: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>>;
+
+    /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
+    ///
+    /// # Errors
+    ///
+    /// - If there is some error with IO
+    /// - If there is a backend-specific error
+    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>>;
 
     /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
     ///
@@ -34,10 +53,25 @@ pub trait Decoder {
     /// - If the format isn't supported
     /// - If there is an error with IO
     /// - If there is a backend-specific error
-    fn read(&self, file: &Path) -> DecoderResult<Box<dyn AudioStream>> {
-        self.read_fallible(file)
+    fn read(&self, path: &Path) -> DecoderResult<Box<dyn AudioStream>> {
+        self.read_fallible(path)
             .transpose()
-            .unwrap_or(Err(DecoderError::UnsupportedFormat(file.to_owned())))
+            .unwrap_or(Err(DecoderError::UnsupportedFormat(Source::File(
+                path.to_owned(),
+            ))))
+    }
+
+    /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
+    ///
+    /// # Errors
+    ///
+    /// - If the format isn't supported
+    /// - If there is an error with IO
+    /// - If there is a backend-specific error
+    fn read_buf(&self, buf: &[u8]) -> DecoderResult<Box<dyn AudioStream>> {
+        self.read_buf_fallible(buf)
+            .transpose()
+            .unwrap_or(Err(DecoderError::UnsupportedFormat(Source::Buffer)))
     }
 }
 
@@ -75,25 +109,42 @@ impl Decoder for List {
         }
         Ok(None)
     }
+
+    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+        for decoder in &self.decoders {
+            if let Some(stream) = decoder.read_buf_fallible(buf)? {
+                return Ok(Some(stream));
+            }
+        }
+        Ok(None)
+    }
 }
 
 #[derive(Error, Debug)]
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub enum DecoderError {
-    #[error("format of file '{0}' is not supported")]
-    UnsupportedFormat(PathBuf),
+    #[error("format of given {0:?} is not supported")]
+    UnsupportedFormat(Source),
     #[error("io error: {0}")]
     IoError(std::io::Error),
-    #[error("malformed data in file '{path}': {}", reason.as_deref().unwrap_or("unknown"))]
+    #[error("malformed data in {source:?}: {}", reason.as_deref().unwrap_or("unknown"))]
     MalformedData {
-        path: PathBuf,
+        source: Source,
         reason: Option<String>,
     },
-    #[error("no tracks found for '{0}'")]
-    NoTracks(PathBuf),
+    #[error("no tracks found for {0}")]
+    NoTracks(Source),
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum Source {
+    #[error("file '{0}'")]
+    File(PathBuf),
+    #[error("buffer")]
+    Buffer,
 }
 
 impl From<std::io::Error> for DecoderError {
