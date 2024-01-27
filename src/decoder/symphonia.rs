@@ -35,26 +35,18 @@ impl Symphonia {
         source: Box<dyn MediaSource>,
         error_source: Source,
         hint: &Hint,
-    ) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+    ) -> DecoderResult<Box<dyn AudioStream>> {
         let source = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
 
         // read the format of the file (but don't decode yet)
-        let format_result = (self.probe)
+        let reader = (self.probe)
             .format(
                 hint,
                 source,
                 &FormatOptions::default(),
                 &MetadataOptions::default(),
             )
-            .map_err(|err| map_error_with_source(err, &error_source));
-
-        // if the format is unsupported, then return None to signify it
-        if matches!(format_result, Err(DecoderError::UnsupportedFormat(_))) {
-            return Ok(None);
-        }
-
-        // propagate the other errors
-        let reader = format_result?;
+            .map_err(|err| map_error_with_source(err, &error_source))?;
 
         // get the default track
         let track = (reader.format)
@@ -62,18 +54,10 @@ impl Symphonia {
             .ok_or_else(|| DecoderError::NoTracks(error_source.clone()))?;
 
         // try to decode the track
-        let decode_result = self
+        let decoder = self
             .codec_registry
             .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|err| map_error_with_source(err, &error_source));
-
-        // if the codec is unsupported, then return None to signify it
-        if matches!(decode_result, Err(DecoderError::UnsupportedFormat(_))) {
-            return Ok(None);
-        }
-
-        // propagate the other errors
-        let decoder = decode_result?;
+            .map_err(|err| map_error_with_source(err, &error_source))?;
 
         let stream = Stream {
             error_source,
@@ -81,15 +65,12 @@ impl Symphonia {
             decoder,
         };
 
-        Ok(Some(Box::new(stream)))
+        Ok(Box::new(stream))
     }
 }
 
 impl Decoder for Symphonia {
-    fn read_fallible(
-        &self,
-        path: &std::path::Path,
-    ) -> super::DecoderResult<Option<Box<dyn super::AudioStream>>> {
+    fn read(&self, path: &std::path::Path) -> super::DecoderResult<Box<dyn super::AudioStream>> {
         let source = Box::new(File::open(path)?);
 
         let mut hint = Hint::new();
@@ -101,7 +82,7 @@ impl Decoder for Symphonia {
         self.read_source(source, Source::File(path.to_owned()), &hint)
     }
 
-    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+    fn read_buf(&self, buf: &[u8]) -> DecoderResult<Box<dyn AudioStream>> {
         let buf: Box<[u8]> = buf.iter().copied().collect();
         let source = Box::new(Cursor::new(buf));
         self.read_source(source, Source::Buffer, &Hint::new())

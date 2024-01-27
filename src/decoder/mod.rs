@@ -29,6 +29,9 @@ pub fn default() -> impl Decoder {
     Symphonia::default()
 }
 
+// NOTE: for implementors: read and read_fallible + buf_read and buf_read_fallible are defined in
+// terms of each other. It's expected for the implementor to either implement read and buf_read or
+// read_fallible and buf_read_fallible, letting the default implementation get the other side
 pub trait Decoder {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
     ///
@@ -36,7 +39,14 @@ pub trait Decoder {
     ///
     /// - If there is some error with IO
     /// - If there is a backend-specific error
-    fn read_fallible(&self, path: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>>;
+    fn read_fallible(&self, path: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+        let res = self.read(path);
+        if matches!(res, Err(DecoderError::UnsupportedFormat(_))) {
+            Ok(None)
+        } else {
+            res.map(Some)
+        }
+    }
 
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
     ///
@@ -44,7 +54,14 @@ pub trait Decoder {
     ///
     /// - If there is some error with IO
     /// - If there is a backend-specific error
-    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>>;
+    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+        let res = self.read_buf(buf);
+        if matches!(res, Err(DecoderError::UnsupportedFormat(_))) {
+            Ok(None)
+        } else {
+            res.map(Some)
+        }
+    }
 
     /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
     ///
