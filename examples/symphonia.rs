@@ -26,7 +26,7 @@ fn main() -> DecoderResult<()> {
     });
 
     // set up a handle to activate or deactivate the volume
-    let volume_handle = effect::Volume::create_handle(0.1);
+    let volume_handle = effect::Volume::create_handle(0.5);
 
     let _device = {
         // output audio (also in another thread)
@@ -34,26 +34,28 @@ fn main() -> DecoderResult<()> {
         let audio = sauti::audio::default();
         audio
             .start(
-                DeviceOptions::default().with_sample_rate(44100),
+                DeviceOptions::default().with_sample_rate(48000),
                 AudioStreamSource {
                     reciever,
-                    effects: effect::ResizeChannels.then(effect::Volume(volume_handle)),
+                    effects: effect::ResizeChannels
+                        .then(effect::Resample::default())
+                        .then(effect::Volume(volume_handle)),
                 },
             )
             .expect("failed to start outputting sound")
     };
 
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    volume_handle.set(1.0);
-
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    volume_handle.set(0.5);
+    // std::io::stdin()
+    //     .read_line(&mut String::new())
+    //     .expect("failed to read stdin");
+    //
+    // volume_handle.set(1.0);
+    //
+    // std::io::stdin()
+    //     .read_line(&mut String::new())
+    //     .expect("failed to read stdin");
+    //
+    // volume_handle.set(0.5);
 
     std::io::stdin()
         .read_line(&mut String::new())
@@ -84,7 +86,7 @@ impl<E: Effect> SoundSource for AudioStreamSource<E> {
     fn build<S: ConvertibleSample>(
         &self,
         info: DeviceInfo,
-    ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+    ) -> impl FnMut(&mut [S]) + Send + 'static {
         let mut source = self.clone();
         let spec = info.into();
 
@@ -97,7 +99,7 @@ impl<E: Effect> SoundSource for AudioStreamSource<E> {
                     [current_index..current_index + channels.len()],
             );
             current_index += channels.len();
-            if current_index >= current_packet.frame_count() * current_packet.channels() {
+            if current_index >= current_packet.frames() * current_packet.channels() {
                 current_packet = source.next_packet(&spec);
                 current_index = 0;
             }

@@ -6,11 +6,13 @@ use crate::data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
 // TODO: resampler using rubato
 
 mod optional;
+mod resample;
 mod resize_channels;
 mod volume;
 pub use optional::Handle as OptionalHandle;
 pub use optional::Optional;
-pub use resize_channels::*;
+pub use resample::Resample;
+pub use resize_channels::ResizeChannels;
 pub use volume::Volume;
 
 pub mod prelude {
@@ -19,7 +21,7 @@ pub mod prelude {
     pub use crate::effect;
 }
 
-pub trait Effect: Clone + Send + Sync + 'static {
+pub trait Effect: Clone + Send + 'static {
     fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,

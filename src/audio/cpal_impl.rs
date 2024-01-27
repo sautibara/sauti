@@ -211,7 +211,7 @@ impl Cpal {
 
     fn data_callback<S: SizedSample>(
         data: &mut [S],
-        handler: &mut (impl FnMut(&mut [S]) + Send + Sync + 'static),
+        handler: &mut (impl FnMut(&mut [S]) + Send + 'static),
         channels: u16,
     ) {
         for sample in data.chunks_mut(channels as usize) {

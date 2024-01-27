@@ -8,7 +8,7 @@ pub mod prelude {
     pub use super::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
 }
 
-/// Supertrait of [`SizedSample`] and conversions from all others
+/// Supertrait of [`Sample`] and conversions from all others
 pub trait ConvertibleSample:
     cpal::SizedSample
     + FromSample<i8>
@@ -65,7 +65,7 @@ impl<T> ConvertibleSample for T where
 {
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct StreamSpec {
     pub channels: usize,
     pub sample_rate: usize,
@@ -126,9 +126,28 @@ pub struct SoundPacket<S: ConvertibleSample> {
 }
 
 impl<S: ConvertibleSample> SoundPacket<S> {
+    /// Creates a sound packet from an interleaved vector of samples.
+    ///
+    /// Each frame of audio consists of a slice of channels in order.
+    ///
     /// # Panics
     ///
-    /// - If spec.channels doesn't evenly fit into samples (samples.len() % spec.channels == 0)
+    /// - If `spec.channels` doesn't evenly fit into `samples`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let spec = StreamSpec { channels: 2, sample_rate: 44100 };
+    /// let samples: Vec<i32> = vec![1, 2, 3, 4];
+    /// let packet = SoundPacket::from_interleaved(samples, spec);
+    ///
+    /// assert_eq!(
+    ///     &*packet.frame_iter().collect::<Box<[_]>>(),
+    ///     &[&[1, 2], &[3, 4]]
+    /// );
+    /// ```
     pub fn from_interleaved(samples: Vec<S>, spec: StreamSpec) -> Self {
         assert!(samples.len() % spec.channels == 0, "the interleaved samples should have the same amount of samples for each channel (samples.len % channels == 0)");
         Self {
@@ -137,13 +156,29 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         }
     }
 
-    pub fn from_channels(samples: &[&[S]], sample_rate: usize) -> Self {
+    /// Creates a sound packet from a list of channels for the packet
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// // Channels are separated at the top level
+    /// let samples = [[1, 2, 3], [4, 5, 6]];
+    /// let packet = SoundPacket::from_channels(&samples, 44100);
+    ///
+    /// assert_eq!(
+    ///     &*packet.frame_iter().collect::<Box<[_]>>(),
+    ///     &[&[1, 4], &[2, 5], &[3, 6]]
+    /// );
+    /// ```
+    pub fn from_channels<V: AsRef<[S]>>(samples: &[V], sample_rate: usize) -> Self {
         let channels = samples.len();
-        let frames = samples.first().map_or(0, |slice| slice.len());
+        let frames = samples.first().map_or(0, |slice| slice.as_ref().len());
         let mut interleaved_samples = vec![S::EQUILIBRIUM; channels * frames];
 
         for (channel, samples) in samples.iter().enumerate() {
-            for (frame, sample) in samples.iter().enumerate() {
+            for (frame, sample) in samples.as_ref().iter().enumerate() {
                 interleaved_samples[frame * channels + channel] = *sample;
             }
         }
@@ -157,6 +192,77 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         }
     }
 
+    pub(crate) fn copy_from_channels<V: AsRef<[S]>>(&mut self, samples: &[V], frames: usize) {
+        let channels = samples.len();
+        if self.interleaved_samples.len() < channels * frames {
+            self.interleaved_samples
+                .resize(channels * frames, S::EQUILIBRIUM);
+        }
+
+        for (channel, samples) in samples.iter().enumerate() {
+            for (frame, sample) in samples.as_ref().iter().take(frames).enumerate() {
+                self.interleaved_samples[frame * channels + channel] = *sample;
+            }
+        }
+    }
+
+    /// Converts this sound packet to a list of audio channels
+    ///
+    /// This is the reciprocal of [`Self::from_channels`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let channels = [[1, 2, 3], [4, 5, 6]];
+    /// let packet = SoundPacket::from_channels(&channels, 44100);
+    ///
+    /// assert_eq!(
+    ///     channels,
+    ///     packet.to_channels(),
+    /// );
+    /// ```
+    pub fn to_channels(&self) -> Vec<Vec<S>> {
+        let mut channels = vec![vec![S::EQUILIBRIUM; self.frames()]; self.channels()];
+        self.copy_to_channels(&mut channels);
+        channels
+    }
+
+    pub fn copy_to_channels(&self, channels: &mut Vec<Vec<S>>) {
+        let frame_count = self.frames();
+        let channel_count = self.channels();
+        // make sure there's enough channels in the output
+        if channels.len() < channel_count {
+            channels.resize(channel_count, vec![S::EQUILIBRIUM; frame_count]);
+        }
+        // and enough frames in each channel
+        for channel in channels
+            .iter_mut()
+            .filter(|channel| channel.len() < frame_count)
+        {
+            channel.resize(frame_count, S::EQUILIBRIUM);
+        }
+        // then copy over all of the samples
+        self.copy_to_channels_unchecked(channels);
+    }
+
+    pub(crate) fn copy_to_channels_unchecked(&self, channels: &mut [Vec<S>]) {
+        let channel_count = self.channels();
+        for frame in 0..self.frames() {
+            let frame_index = frame * channel_count;
+            let frame_slice = &self.interleaved_samples[frame_index..frame_index + channel_count];
+            for channel in 0..channel_count {
+                channels[channel][frame] = frame_slice[channel];
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn spec(&self) -> &StreamSpec {
+        &self.spec
+    }
+
     #[must_use]
     pub const fn channels(&self) -> usize {
         self.spec.channels
@@ -168,12 +274,12 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     }
 
     #[must_use]
-    pub fn frame_count(&self) -> usize {
-        self.interleaved_samples().len() / self.channels()
+    pub fn frames(&self) -> usize {
+        self.interleaved_samples.len() / self.channels()
     }
 
     #[must_use]
-    pub fn frames(&self) -> impl DoubleEndedIterator<Item = &[S]> {
+    pub fn frame_iter(&self) -> impl DoubleEndedIterator<Item = &[S]> {
         self.interleaved_samples.chunks_exact(self.channels())
     }
 
@@ -190,37 +296,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
             channel < self.channels(),
             "accessed channel index shouldn't be more than the amount of channels in the packet"
         );
-        self.frames().map(move |channels| &channels[channel])
-    }
-
-    pub fn to_channels(&self) -> Vec<Vec<S>> {
-        let mut channels = vec![vec![S::EQUILIBRIUM; self.frame_count()]; self.channels()];
-        self.copy_to_channels(&mut channels);
-        channels
-    }
-
-    pub fn copy_to_channels(&self, channels: &mut Vec<Vec<S>>) {
-        let frame_count = self.frame_count();
-        let channel_count = self.channels();
-        // make sure there's enough channels in the output
-        if channels.len() < channel_count {
-            channels.resize(channel_count, vec![S::EQUILIBRIUM; frame_count]);
-        }
-        // and enough frames in each channel
-        for channel in channels
-            .iter_mut()
-            .filter(|channel| channel.len() < frame_count)
-        {
-            channel.resize(frame_count, S::EQUILIBRIUM);
-        }
-        // then copy over all of the samples
-        for frame in 0..self.frame_count() {
-            let frame_index = frame * channel_count;
-            let frame_slice = &self.interleaved_samples[frame_index..frame_index + channel_count];
-            for channel in 0..channel_count {
-                channels[channel][frame] = frame_slice[channel];
-            }
-        }
+        self.frame_iter().map(move |channels| &channels[channel])
     }
 
     pub fn resize_and_map_channels<F>(mut self, to_channels: usize, mut map: F) -> Self
@@ -258,7 +334,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
 
     fn resize_to_fit_channels(&mut self, to_channels: usize) {
         self.interleaved_samples
-            .resize(to_channels * self.frame_count(), S::EQUILIBRIUM);
+            .resize(to_channels * self.frames(), S::EQUILIBRIUM);
         // the amount of channels are changed now
         self.spec.channels = to_channels;
     }
@@ -267,7 +343,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     where
         F: FnMut(&mut [S], usize, usize),
     {
-        let frames = self.frame_count();
+        let frames = self.frames();
         let channels = self.channels();
         for frame in 0..frames {
             let frame_index = frame * channels;
@@ -286,7 +362,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         // the iterators might have to be reversed if the space available is expanding
         iter_map: impl Fn(Range<usize>) -> O,
     ) {
-        let frames = self.frame_count();
+        let frames = self.frames();
         // the amount of channels that will be copied
         let copy_channels = from_channels.min(to_channels);
         // go through each frame and copy over the channels
@@ -301,11 +377,14 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         }
     }
 
-    pub fn convert<N: ConvertibleSample + FromSample<S>>(self) -> SoundPacket<N> {
+    pub fn convert<N: ConvertibleSample>(&self) -> SoundPacket<N>
+    where
+        S: ToSample<N>,
+    {
         let interleaved_samples = self
             .interleaved_samples
-            .into_iter()
-            .map(|source| N::from_sample(source))
+            .iter()
+            .map(|sample| sample.to_sample())
             .collect();
         SoundPacket {
             interleaved_samples,

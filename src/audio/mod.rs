@@ -4,7 +4,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use sauti::audio::{Audio, ConvertibleSample, DeviceInfo, DeviceOptions, SoundSource};
+//! use sauti::audio::prelude::*;
 //!
 //! // this program outputs a 440.0 hz sin wave on the main device
 //! fn main() {
@@ -182,7 +182,7 @@ pub trait SoundSource: 'static {
     /// # Examples
     ///
     /// ```
-    /// # use sauti::audio::*;
+    /// # use sauti::audio::prelude::*;
     /// # struct Beep { frequency: f64 }
     /// # impl SoundSource for Beep {
     /// fn build<S: ConvertibleSample>(
@@ -210,17 +210,14 @@ pub trait SoundSource: 'static {
     fn build<S: ConvertibleSample>(
         &self,
         context: DeviceInfo,
-    ) -> impl FnMut(&mut [S]) + Send + Sync + 'static; // thank you 1.75
+    ) -> impl FnMut(&mut [S]) + Send + 'static; // thank you 1.75
 }
 
 /// Source that only outputs silence
 pub struct Silence;
 
 impl SoundSource for Silence {
-    fn build<S: ConvertibleSample>(
-        &self,
-        _: DeviceInfo,
-    ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+    fn build<S: ConvertibleSample>(&self, _: DeviceInfo) -> impl FnMut(&mut [S]) + Send + 'static {
         |channels| channels.fill(S::EQUILIBRIUM)
     }
 }
@@ -373,6 +370,12 @@ impl DeviceOptions {
             current: Some(self),
         }
     }
+
+    /// Get the number of potential options, including backups
+    #[must_use]
+    pub fn variants(&self) -> usize {
+        1 + self.backup.as_ref().map_or(0, |backup| backup.variants())
+    }
 }
 
 impl<'a> IntoIterator for &'a DeviceOptions {
@@ -411,6 +414,11 @@ impl<'a> Iterator for DeviceOptionIterator<'a> {
             self.current = after;
         }
         current
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = (self.current.as_ref()).map_or(0, |current| current.variants());
+        (size, Some(size))
     }
 }
 

@@ -75,6 +75,7 @@ pub trait Decoder {
     }
 }
 
+// TODO: guarantee that the number of frames will be about equal
 pub trait AudioStream {
     /// # Errors
     ///
