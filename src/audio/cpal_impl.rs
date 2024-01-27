@@ -3,14 +3,14 @@
 // these are set to usize for easier arithmetic with things that use usize
 #![allow(clippy::cast_possible_truncation)]
 
-use cpal::{SampleRate, SupportedStreamConfig, SupportedStreamConfigRange};
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    SampleRate, SupportedStreamConfig, SupportedStreamConfigRange,
+};
 
 use crate::data::ConvertibleSample;
 
-use super::{
-    Audio, AudioError, AudioResult, Device, DeviceInfo, DeviceOptions, DeviceTrait, HostTrait,
-    SampleFormat, SizedSample, SoundSource, StreamTrait,
-};
+use super::prelude::*;
 
 // options stuff //
 

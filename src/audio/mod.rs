@@ -50,25 +50,18 @@
 
 use std::ops::Deref;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
 mod cpal_impl;
 
 pub mod prelude {
     pub use super::{
-        Audio, AudioError, AudioResult, DeviceExt, DeviceInfo, DeviceOptions, SampleFormat,
-        SoundSource,
+        Audio, AudioError, AudioResult, Device, DeviceExt, DeviceInfo, DeviceOptions, SoundSource,
     };
-    pub use crate::data::ConvertibleSample;
+    pub use crate::data::*;
 }
 
-/// An enum representing the acceptable sound sample types
-pub use cpal::SampleFormat;
-/// A basic sound sample
-pub use cpal::SizedSample;
-
-use crate::data::ConvertibleSample;
+use crate::data::{ConvertibleSample, SampleFormat};
 
 /// Find the default [`Audio`] handler
 #[must_use]

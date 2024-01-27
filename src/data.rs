@@ -2,15 +2,24 @@ use std::{cmp::Ordering, convert::identity, ops::Range};
 
 use crate::audio::DeviceInfo;
 
+/// An enum representing the acceptable sound sample types
+pub use cpal::SampleFormat;
+/// A sound sample that's represented by [`SampleFormat`]
+pub use cpal::SizedSample;
+
 pub use dasp_sample::{FromSample, Sample, ToSample};
 
+/// Some useful things to have when working with the different data types in this crate
+///
+/// Every other module's prelude already exports this, so it's rare that it will have to be
+/// imported by itself
 pub mod prelude {
-    pub use super::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
+    pub use super::{ConvertibleSample, GenericPacket, Sample, SoundPacket, StreamSpec};
 }
 
 /// Supertrait of [`Sample`] and conversions from all others
 pub trait ConvertibleSample:
-    cpal::SizedSample
+    SizedSample
     + FromSample<i8>
     + FromSample<i16>
     + FromSample<i32>
@@ -38,7 +47,7 @@ pub trait ConvertibleSample:
 }
 
 impl<T> ConvertibleSample for T where
-    T: cpal::SizedSample
+    T: SizedSample
         + FromSample<i8>
         + FromSample<i16>
         + FromSample<i32>
@@ -65,6 +74,7 @@ impl<T> ConvertibleSample for T where
 {
 }
 
+/// Stores information about an audio stream
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct StreamSpec {
     pub channels: usize,
@@ -80,6 +90,9 @@ impl From<DeviceInfo> for StreamSpec {
     }
 }
 
+/// A generic form of [`SoundPacket`]
+///
+/// Use [`Self::convert`] to turn this into a more useable type
 #[must_use]
 #[derive(Clone)]
 pub enum GenericPacket {
@@ -96,6 +109,7 @@ pub enum GenericPacket {
 }
 
 impl GenericPacket {
+    /// Convert this packet into a typed [`SoundPacket`]
     pub fn convert<N: ConvertibleSample>(self) -> SoundPacket<N> {
         self.into()
     }
@@ -118,6 +132,18 @@ impl<N: ConvertibleSample> From<GenericPacket> for SoundPacket<N> {
     }
 }
 
+/// An immutable packet of sound data, potentially with multiple channels
+///
+/// Terminology:
+/// - A `sample` is any single value representing sound - it represents the compression or
+/// expansion of the air
+/// - A `channel` is a list of samples coming from a single direction - there's usually one for
+/// each ear (stereo)
+/// - A `frame` represents a single instance in time, combining each channel's current sample
+/// together
+///
+/// The packet also includes a [`StreamSpec`] that holds information about the stream (most notably
+/// its sample rate)
 #[must_use]
 #[derive(Clone)]
 pub struct SoundPacket<S: ConvertibleSample> {
@@ -140,12 +166,13 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     /// use sauti::data::prelude::*;
     ///
     /// let spec = StreamSpec { channels: 2, sample_rate: 44100 };
-    /// let samples: Vec<i32> = vec![1, 2, 3, 4];
+    /// let samples = vec![1, 2, 3, 4];
     /// let packet = SoundPacket::from_interleaved(samples, spec);
     ///
     /// assert_eq!(
-    ///     &*packet.frame_iter().collect::<Box<[_]>>(),
-    ///     &[&[1, 2], &[3, 4]]
+    ///     packet.frame_iter()
+    ///           .collect::<Vec<_>>(),
+    ///     [[1, 2], [3, 4]]
     /// );
     /// ```
     pub fn from_interleaved(samples: Vec<S>, spec: StreamSpec) -> Self {
@@ -168,8 +195,8 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     /// let packet = SoundPacket::from_channels(&samples, 44100);
     ///
     /// assert_eq!(
-    ///     &*packet.frame_iter().collect::<Box<[_]>>(),
-    ///     &[&[1, 4], &[2, 5], &[3, 6]]
+    ///     packet.frame_iter().collect::<Vec<_>>(),
+    ///     [[1, 4], [2, 5], [3, 6]]
     /// );
     /// ```
     pub fn from_channels<V: AsRef<[S]>>(samples: &[V], sample_rate: usize) -> Self {
@@ -210,18 +237,17 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     ///
     /// This is the reciprocal of [`Self::from_channels`]
     ///
+    /// Also see [`Self::copy_to_channels`] for an option that doesn't always allocate data
+    ///
     /// # Examples
     ///
     /// ```
     /// use sauti::data::prelude::*;
     ///
-    /// let channels = [[1, 2, 3], [4, 5, 6]];
+    /// let channels = vec![vec![1, 2, 3], vec![4, 5, 6]];
     /// let packet = SoundPacket::from_channels(&channels, 44100);
     ///
-    /// assert_eq!(
-    ///     channels,
-    ///     packet.to_channels(),
-    /// );
+    /// assert_eq!(channels, packet.to_channels());
     /// ```
     pub fn to_channels(&self) -> Vec<Vec<S>> {
         let mut channels = vec![vec![S::EQUILIBRIUM; self.frames()]; self.channels()];
@@ -229,6 +255,21 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         channels
     }
 
+    /// Copies samples from this sound packet to a list of audio channels
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let channels = vec![vec![1, 2, 3], vec![4, 5, 6]];
+    /// let mut channels_out = vec![vec![0; 3]; 2];
+    ///
+    /// let packet = SoundPacket::from_channels(&channels, 44100);
+    /// packet.copy_to_channels(&mut channels_out);
+    ///
+    /// assert_eq!(channels, channels_out);
+    /// ```
     pub fn copy_to_channels(&self, channels: &mut Vec<Vec<S>>) {
         let frame_count = self.frames();
         let channel_count = self.channels();
@@ -278,27 +319,103 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         self.interleaved_samples.len() / self.channels()
     }
 
+    /// Obtain an iterator over each frame of the packet
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let samples = vec![1, 2, 3, 4];
+    /// let spec = StreamSpec { channels: 2, sample_rate: 44100 };
+    /// let packet = SoundPacket::from_interleaved(samples, spec);
+    ///
+    /// assert_eq!(
+    ///     packet.frame_iter()
+    ///           .collect::<Vec<_>>(),
+    ///     [[1, 2], [3, 4]]
+    /// );
+    /// ```
     #[must_use]
     pub fn frame_iter(&self) -> impl DoubleEndedIterator<Item = &[S]> {
         self.interleaved_samples.chunks_exact(self.channels())
     }
 
+    /// Obtain a slice of all samples in an interleaved order
+    ///
+    /// This is the reciprocal of [`Self::from_interleaved`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let samples = vec![1, 2, 3, 4];
+    /// let spec = StreamSpec { channels: 2, sample_rate: 44100 };
+    /// let packet = SoundPacket::from_interleaved(samples.clone(), spec);
+    ///
+    /// assert_eq!(samples, packet.interleaved_samples());
+    /// ```
     #[must_use]
     pub fn interleaved_samples(&self) -> &[S] {
         &self.interleaved_samples[..]
     }
 
+    /// Access a single channel of the packet
+    ///
     /// # Panics
     ///
-    /// - If `channel` is more than the amount of channels in the packet
-    pub fn chan(&self, channel: usize) -> impl Iterator<Item = &S> {
+    /// - If `index` is out of bounds for the amount of channels
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let channels = [[1, 2, 3], [4, 5, 6]];
+    /// let packet = SoundPacket::from_channels(&channels, 44100);
+    ///
+    /// assert_eq!(
+    ///     packet.chan(1).collect::<Vec<_>>(),
+    ///     channels[1]
+    /// );
+    /// ```
+    pub fn chan(&self, index: usize) -> impl Iterator<Item = S> + '_ {
         assert!(
-            channel < self.channels(),
+            index < self.channels(),
             "accessed channel index shouldn't be more than the amount of channels in the packet"
         );
-        self.frame_iter().map(move |channels| &channels[channel])
+        // equivalent to self.frame_iter().map(move |channels| channels[index])
+        self.interleaved_samples
+            .iter()
+            .copied()
+            .skip(index)
+            .step_by(index + 1)
     }
 
+    /// Resize the channels of this packet by mapping each frame
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let channels = [[1, 2, 3], [3, 4, 5]];
+    /// let packet = SoundPacket::from_channels(&channels, 44100);
+    ///
+    /// // converts to mono by averaging all channels
+    /// let mapped = packet.resize_and_map_channels(1,
+    ///     |frame, from_channels, _to_channels| {
+    ///         let average = frame.iter().sum::<u32>() / from_channels as u32;
+    ///         frame.fill(average);
+    ///     }
+    /// );
+    ///
+    /// assert_eq!(
+    ///     mapped.to_channels(),
+    ///     [[2, 3, 4]]
+    /// );
+    /// ```
     pub fn resize_and_map_channels<F>(mut self, to_channels: usize, mut map: F) -> Self
     where
         F: FnMut(&mut [S], usize, usize),
@@ -377,6 +494,23 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         }
     }
 
+    /// Convert the packet to a new type
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let channels = [[i32::EQUILIBRIUM]];
+    ///
+    /// let packet = SoundPacket::from_channels(&channels, 44100);
+    /// let converted = packet.convert::<f32>();
+    ///
+    /// assert_eq!(
+    ///     converted.interleaved_samples()[0],
+    ///     f32::EQUILIBRIUM
+    /// );
+    /// ```
     pub fn convert<N: ConvertibleSample>(&self) -> SoundPacket<N>
     where
         S: ToSample<N>,
@@ -392,6 +526,22 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         }
     }
 
+    /// Map each sample with the provided function
+    ///
+    /// ```
+    /// use sauti::data::prelude::*;
+    ///
+    /// let samples = vec![1.0, 2.0, 3.0, 4.0];
+    /// let spec = StreamSpec { channels: 2, sample_rate: 44100 };
+    /// let packet = SoundPacket::from_interleaved(samples, spec);
+    ///
+    /// let mapped = packet.map_samples(|sample| sample * 2.0);
+    ///
+    /// assert_eq!(
+    ///     mapped.interleaved_samples(),
+    ///     &[2.0, 4.0, 6.0, 8.0]
+    /// );
+    /// ```
     pub fn map_samples(mut self, mut map: impl FnMut(&S) -> S) -> Self {
         for sample in &mut self.interleaved_samples {
             *sample = map(sample);
