@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use sauti::{audio::prelude::*, decoder::prelude::*, effect::prelude::*};
 
@@ -10,29 +11,17 @@ fn main() -> DecoderResult<()> {
     let path = std::env::args().nth(1).expect("usage: {command} {path}");
 
     // set up a stream between the decoder and the audio output
-    let (sender, reciever) = crossbeam_channel::unbounded();
-    // decode the file in another thread
-    let decoder_result = std::thread::spawn(move || {
-        let decoder = sauti::decoder::default();
-        let mut stream = decoder.read(Path::new(&path))?;
-
-        while (stream.next_packet()?)
-            .and_then(|packet| sender.send(packet).ok())
-            .is_some()
-        {}
-
-        println!("finished!");
-        Ok(())
-    });
+    let (sender, reciever) = crossbeam_channel::bounded(2);
+    let (seek, seek_reciever) = crossbeam_channel::unbounded();
 
     // set up a handle to activate or deactivate the volume
     let volume_handle = effect::Volume::create_handle(0.5);
 
-    let _device = {
+    // decode the file in another thread
+    let decoder_result = std::thread::spawn(move || {
         // output audio (also in another thread)
-        let volume_handle = volume_handle.clone();
         let audio = sauti::audio::default();
-        audio
+        let device = audio
             .start(
                 DeviceOptions::default().with_sample_rate(48000),
                 AudioStreamSource {
@@ -42,20 +31,48 @@ fn main() -> DecoderResult<()> {
                         .then(effect::Volume(volume_handle)),
                 },
             )
-            .expect("failed to start outputting sound")
-    };
+            .expect("failed to start outputting sound");
 
-    // std::io::stdin()
-    //     .read_line(&mut String::new())
-    //     .expect("failed to read stdin");
-    //
-    // volume_handle.set(1.0);
-    //
-    // std::io::stdin()
-    //     .read_line(&mut String::new())
-    //     .expect("failed to read stdin");
-    //
-    // volume_handle.set(0.5);
+        let decoder = sauti::decoder::default();
+        let mut stream = decoder.read(Path::new(&path))?;
+
+        // TODO: so many levels of nesting
+        loop {
+            let packet = stream.next_packet()?;
+            let Some(packet) = packet else { break };
+
+            crossbeam_channel::select! {
+                send(sender, packet) -> _ => (),
+                recv(seek_reciever) -> message => {
+                    if message.expect("message sender hung up") {
+                        stream.seek_to(Duration::from_secs(30)).expect("failed to seek");
+                    }
+                }
+            }
+        }
+        // while (stream.next_packet()?)
+        //     .and_then(|packet| sender.send(packet).ok())
+        //     .is_some()
+        // {}
+
+        // the audio is done, stop outputting
+        drop(device);
+
+        println!("finished!");
+        Ok(())
+    });
+
+    std::io::stdin()
+        .read_line(&mut String::new())
+        .expect("failed to read stdin");
+
+    seek.send(true).expect("failed");
+
+    std::io::stdin()
+        .read_line(&mut String::new())
+        .expect("failed to read stdin");
+
+    seek.send(true).expect("failed");
 
     std::io::stdin()
         .read_line(&mut String::new())
@@ -90,17 +107,17 @@ impl<E: Effect> SoundSource for AudioStreamSource<E> {
         let mut source = self.clone();
         let spec = info.into();
 
-        let mut current_packet = source.next_packet(&spec);
+        let mut current_packet = None;
         let mut current_index = 0;
 
         move |channels| {
+            let packet = current_packet.get_or_insert_with(|| source.next_packet(&spec));
             channels.copy_from_slice(
-                &current_packet.interleaved_samples()
-                    [current_index..current_index + channels.len()],
+                &packet.interleaved_samples()[current_index..current_index + channels.len()],
             );
             current_index += channels.len();
-            if current_index >= current_packet.frames() * current_packet.channels() {
-                current_packet = source.next_packet(&spec);
+            if current_index >= packet.frames() * packet.channels() {
+                current_packet = None;
                 current_index = 0;
             }
         }

@@ -59,7 +59,7 @@ impl Handle {
 }
 
 impl<E: Effect> Effect for Optional<E> {
-    #[inline(always)]
+    #[inline]
     fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,

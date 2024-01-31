@@ -1,3 +1,6 @@
+//! Various data structures that are used throughout the crate
+use std::fmt::Debug;
+// TODO: example
 use std::{cmp::Ordering, convert::identity, ops::Range};
 
 use crate::audio::DeviceInfo;
@@ -42,6 +45,7 @@ pub trait ConvertibleSample:
     + ToSample<f64>
     + Send
     + Sync
+    + Debug
     + 'static
 {
 }
@@ -68,6 +72,7 @@ impl<T> ConvertibleSample for T where
         + ToSample<u64>
         + ToSample<f32>
         + ToSample<f64>
+        + Debug
         + Send
         + Sync
         + 'static

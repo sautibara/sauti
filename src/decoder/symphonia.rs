@@ -1,15 +1,17 @@
-use std::{fs::File, io::Cursor, ops::Deref};
+use std::{fs::File, io::Cursor, ops::Deref, option::Option, time::Duration};
 
 use symphonia::core::{
     audio::{AudioBuffer, AudioBufferRef, Signal},
     codecs::{CodecRegistry, DecoderOptions},
-    formats::{FormatOptions, FormatReader},
+    errors::SeekErrorKind,
+    formats::{FormatOptions, FormatReader, SeekMode},
     io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
     probe::{Hint, Probe},
+    units::Time,
 };
 
-use super::{prelude::*, Source};
+use super::{prelude::*, SeekError, Source};
 
 pub struct Symphonia {
     probe: Probe,
@@ -110,6 +112,34 @@ impl AudioStream for Stream {
         let packet = symphonia_packet.into();
         Ok(Some(packet))
     }
+
+    fn seek_to(&mut self, duration: Duration) -> DecoderResult<()> {
+        let secs = duration.as_secs();
+        let subsecs = duration.as_secs_f64().fract();
+        let time = Time::new(secs, subsecs);
+        self.file
+            .seek(
+                SeekMode::Coarse,
+                symphonia::core::formats::SeekTo::Time {
+                    time,
+                    track_id: None,
+                },
+            )
+            .map_err(|err| map_error_with_source(err, &self.error_source))?;
+        Ok(())
+    }
+
+    fn duration(&self) -> Option<Duration> {
+        let track = &self.file.default_track()?.codec_params;
+        let frames = track.n_frames?;
+        let sample_rate = u64::from(track.sample_rate?);
+
+        let secs = frames / sample_rate;
+        let remaining = frames % sample_rate;
+        let nanos = remaining * 1_000_000_000 / sample_rate;
+
+        Some(Duration::new(secs, nanos.try_into().unwrap_or(0)))
+    }
 }
 
 fn is_end_of_stream<T>(error: &Result<T, SymphoniaError>) -> bool {
@@ -156,11 +186,27 @@ fn map_error_with_source(error: SymphoniaError, source: &Source) -> DecoderError
             source: source.clone(),
             reason: Some(reason.to_string()),
         },
-        SymphoniaError::SeekError(_) => unimplemented!("decoder never seeks"),
+        SymphoniaError::SeekError(kind) => DecoderError::SeekError {
+            source: source.clone(),
+            reason: kind.into(),
+        },
         SymphoniaError::Unsupported(_) => DecoderError::UnsupportedFormat(source.clone()),
         SymphoniaError::LimitError(error) => DecoderError::Other(Some(error.to_string())),
         SymphoniaError::ResetRequired => {
             DecoderError::Other(Some("decoder needs reset".to_string()))
+        }
+    }
+}
+
+impl From<SeekErrorKind> for SeekError {
+    fn from(value: SeekErrorKind) -> Self {
+        match value {
+            SeekErrorKind::Unseekable => Self::Unseekable,
+            SeekErrorKind::OutOfRange => Self::OutOfBounds,
+            SeekErrorKind::ForwardOnly => Self::ForwardOnly,
+            SeekErrorKind::InvalidTrack => {
+                unreachable!("decoder never sets the track when seeking")
+            }
         }
     }
 }

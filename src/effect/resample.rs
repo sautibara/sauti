@@ -25,20 +25,19 @@ impl Resample {
         &mut self,
         input_spec: &StreamSpec,
         output_spec: &StreamSpec,
-        input_frames: usize,
+        frame_count: usize,
     ) -> &mut Inner {
-        if !self
-            .resampler
-            .as_ref()
-            .is_some_and(|resampler| resampler.matches(input_spec, output_spec, input_frames))
-        {
-            let new = Inner::new(*input_spec, *output_spec, input_frames);
-            self.resampler = Some(new);
+        let resampler_matches = (self.resampler.as_ref())
+            .is_some_and(|resampler| resampler.matches(input_spec, output_spec, frame_count));
+
+        if !resampler_matches {
+            let replacement = Inner::new(*input_spec, *output_spec, frame_count);
+            self.resampler = Some(replacement);
         }
 
         // SAFETY: a None variant would be replaced with Some above
-        // this can't be done the normal way (using an if let block) because of a limitation in the
-        // borrow checker (see https://rust-lang.github.io/rfcs/2094-nll.html#problem-case-3-conditional-control-flow-across-functions)
+        // this can't be done the normal way (using an if let block) because of a limitation in the borrow checker
+        // (see https://rust-lang.github.io/rfcs/2094-nll.html#problem-case-3-conditional-control-flow-across-functions)
         unsafe { self.resampler.as_mut().unwrap_unchecked() }
     }
 }
@@ -55,8 +54,8 @@ impl Effect for Resample {
             return input;
         }
 
-        let input_frames = input.frames();
-        let resampler = self.resampler(input_spec, output_spec, input_frames);
+        let frame_count = input.frames();
+        let resampler = self.resampler(input_spec, output_spec, frame_count);
         let processed = resampler.process(input.convert());
         processed.convert()
     }

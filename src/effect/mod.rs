@@ -1,6 +1,3 @@
-// TODO: actually measure the performance of the inlining
-#![allow(clippy::inline_always)]
-
 use crate::data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
 
 // TODO: resampler using rubato
@@ -53,7 +50,7 @@ pub struct List<E: Effect, N: Effect> {
 }
 
 impl<E: Effect, N: Effect> Effect for List<E, N> {
-    #[inline(always)]
+    #[inline]
     fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,
@@ -61,6 +58,20 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
     ) -> SoundPacket<S> {
         let packet = self.current.apply_to(input, output_spec);
         self.next.apply_to(packet, output_spec)
+    }
+}
+
+#[derive(Clone)]
+pub struct None;
+
+impl Effect for None {
+    #[inline]
+    fn apply_to<S: ConvertibleSample>(
+        &mut self,
+        input: SoundPacket<S>,
+        _: &StreamSpec,
+    ) -> SoundPacket<S> {
+        input
     }
 }
 

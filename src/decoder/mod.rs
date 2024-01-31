@@ -9,6 +9,7 @@
 use std::{
     fmt::Debug,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use thiserror::Error;
@@ -94,12 +95,28 @@ pub trait Decoder {
 
 // TODO: guarantee that the number of frames will be about equal
 pub trait AudioStream {
+    /// Get the next packet of data from the stream
+    ///
+    /// The packets are guaranteed to be:
+    /// - Fairly small (so that [effects](crate::effect) aren't too intensive)
+    /// - A consistent size (for effects that [need this](crate::effect::ResizeChannels))
+    ///
     /// # Errors
     ///
     /// - If there is an error found while decoding
     /// - If there is an error with IO
     /// - If there is a backend-specific error
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>>;
+
+    /// # Errors
+    ///
+    /// - If the stream is unseekable
+    /// - If the stream can only be seeked forward
+    /// - If the duration is out of the bounds of the stream
+    /// - If there's a backend-specific error
+    fn seek_to(&mut self, duration: Duration) -> DecoderResult<()>;
+
+    fn duration(&self) -> Option<Duration>;
 }
 
 #[derive(Default)]
@@ -153,8 +170,20 @@ pub enum DecoderError {
     },
     #[error("no tracks found for {0}")]
     NoTracks(Source),
+    #[error("failed to seek {source:?}: {reason:?}")]
+    SeekError { source: Source, reason: SeekError },
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
+}
+
+#[derive(Error, Debug)]
+pub enum SeekError {
+    #[error("file is unseekable")]
+    Unseekable,
+    #[error("given timestamp is out of bounds")]
+    OutOfBounds,
+    #[error("file can only be seeked forward")]
+    ForwardOnly,
 }
 
 #[derive(Error, Debug, Clone)]

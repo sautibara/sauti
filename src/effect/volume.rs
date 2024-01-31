@@ -13,6 +13,12 @@ impl Volume {
     pub fn create_handle(initial: f32) -> Handle {
         Handle::new(initial)
     }
+
+    #[must_use]
+    pub fn constant(initial: f32) -> Self {
+        let handle = Self::create_handle(initial);
+        Self(handle)
+    }
 }
 
 impl Effect for Volume {
