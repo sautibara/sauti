@@ -38,6 +38,7 @@ struct Beep {
 
 impl SoundSource for Beep {
     // the sound source is generic over the sample type
+    #[allow(clippy::cast_precision_loss)] // the sample rate shouldn't be too big to fit in an f64
     fn build<S: ConvertibleSample>(
         &self,
         info: DeviceInfo,

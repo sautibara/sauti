@@ -6,11 +6,7 @@
 //! use sauti::decoder::prelude::*;
 //! ```
 
-use std::{
-    fmt::Debug,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{default::Default as _, fmt::Debug, path::PathBuf, time::Duration};
 
 use thiserror::Error;
 
@@ -25,38 +21,27 @@ pub mod prelude {
 
 pub use symphonia::Symphonia;
 
+use self::prelude::*;
+
 #[must_use]
-pub fn default() -> impl Decoder {
+pub fn default() -> self::Default {
     Symphonia::default()
 }
+
+pub type Default = Symphonia;
 
 // NOTE: for implementors: read and read_fallible + buf_read and buf_read_fallible are defined in
 // terms of each other. It's expected for the implementor to either implement read and buf_read or
 // read_fallible and buf_read_fallible, letting the default implementation get the other side
-pub trait Decoder {
+pub trait Decoder: Send + 'static {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
     ///
     /// # Errors
     ///
     /// - If there is some error with IO
     /// - If there is a backend-specific error
-    fn read_fallible(&self, path: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>> {
-        let res = self.read(path);
-        if matches!(res, Err(DecoderError::UnsupportedFormat(_))) {
-            Ok(None)
-        } else {
-            res.map(Some)
-        }
-    }
-
-    /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
-    ///
-    /// # Errors
-    ///
-    /// - If there is some error with IO
-    /// - If there is a backend-specific error
-    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
-        let res = self.read_buf(buf);
+    fn read_fallible(&self, source: &MediaSource) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+        let res = self.read(source);
         if matches!(res, Err(DecoderError::UnsupportedFormat(_))) {
             Ok(None)
         } else {
@@ -71,25 +56,10 @@ pub trait Decoder {
     /// - If the format isn't supported
     /// - If there is an error with IO
     /// - If there is a backend-specific error
-    fn read(&self, path: &Path) -> DecoderResult<Box<dyn AudioStream>> {
-        self.read_fallible(path)
+    fn read(&self, source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
+        self.read_fallible(source)
             .transpose()
-            .unwrap_or(Err(DecoderError::UnsupportedFormat(Source::File(
-                path.to_owned(),
-            ))))
-    }
-
-    /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
-    ///
-    /// # Errors
-    ///
-    /// - If the format isn't supported
-    /// - If there is an error with IO
-    /// - If there is a backend-specific error
-    fn read_buf(&self, buf: &[u8]) -> DecoderResult<Box<dyn AudioStream>> {
-        self.read_buf_fallible(buf)
-            .transpose()
-            .unwrap_or(Err(DecoderError::UnsupportedFormat(Source::Buffer)))
+            .unwrap_or(Err(DecoderError::UnsupportedFormat(source.into())))
     }
 }
 
@@ -119,7 +89,7 @@ pub trait AudioStream {
     fn duration(&self) -> Option<Duration>;
 }
 
-#[derive(Default)]
+#[derive(std::default::Default)]
 pub struct List {
     decoders: Vec<Box<dyn Decoder>>,
 }
@@ -136,18 +106,9 @@ impl List {
 }
 
 impl Decoder for List {
-    fn read_fallible(&self, file: &Path) -> DecoderResult<Option<Box<dyn AudioStream>>> {
+    fn read_fallible(&self, source: &MediaSource) -> DecoderResult<Option<Box<dyn AudioStream>>> {
         for decoder in &self.decoders {
-            if let Some(stream) = decoder.read_fallible(file)? {
-                return Ok(Some(stream));
-            }
-        }
-        Ok(None)
-    }
-
-    fn read_buf_fallible(&self, buf: &[u8]) -> DecoderResult<Option<Box<dyn AudioStream>>> {
-        for decoder in &self.decoders {
-            if let Some(stream) = decoder.read_buf_fallible(buf)? {
+            if let Some(stream) = decoder.read_fallible(source)? {
                 return Ok(Some(stream));
             }
         }
@@ -160,18 +121,21 @@ impl Decoder for List {
 #[allow(clippy::module_name_repetitions)]
 pub enum DecoderError {
     #[error("format of given {0:?} is not supported")]
-    UnsupportedFormat(Source),
+    UnsupportedFormat(ErrorSource),
     #[error("io error: {0}")]
     IoError(std::io::Error),
     #[error("malformed data in {source:?}: {}", reason.as_deref().unwrap_or("unknown"))]
     MalformedData {
-        source: Source,
+        source: ErrorSource,
         reason: Option<String>,
     },
     #[error("no tracks found for {0}")]
-    NoTracks(Source),
+    NoTracks(ErrorSource),
     #[error("failed to seek {source:?}: {reason:?}")]
-    SeekError { source: Source, reason: SeekError },
+    SeekError {
+        source: ErrorSource,
+        reason: SeekError,
+    },
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
 }
@@ -187,11 +151,20 @@ pub enum SeekError {
 }
 
 #[derive(Error, Debug, Clone)]
-pub enum Source {
+pub enum ErrorSource {
     #[error("file '{0}'")]
     File(PathBuf),
     #[error("buffer")]
     Buffer,
+}
+
+impl From<&MediaSource> for ErrorSource {
+    fn from(value: &MediaSource) -> Self {
+        match value {
+            MediaSource::Buffer(_) => Self::Buffer,
+            MediaSource::Path(path) => Self::File(path.to_owned()),
+        }
+    }
 }
 
 impl From<std::io::Error> for DecoderError {

@@ -65,14 +65,16 @@ use crate::data::{ConvertibleSample, SampleFormat};
 
 /// Find the default [`Audio`] handler
 #[must_use]
-pub fn default() -> impl Audio {
+pub const fn default() -> Default {
     cpal_impl::Cpal
 }
+
+pub type Default = cpal_impl::Cpal;
 
 /// A low-level interface for outputting audio
 ///
 /// Sound is started using the [start](Self::start) method
-pub trait Audio {
+pub trait Audio: Clone + Send + 'static {
     /// Create a new [`Device`] and start it running using a [`SoundSource`]
     ///
     /// # Errors

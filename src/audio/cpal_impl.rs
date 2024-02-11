@@ -116,6 +116,7 @@ impl SupportedConfig {
 
 // actual cpal stuff //
 
+#[derive(Clone)]
 pub struct Cpal;
 
 impl Cpal {

@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::time::Duration;
 
 use sauti::{audio::prelude::*, decoder::prelude::*, effect::prelude::*};
 
@@ -12,7 +11,6 @@ fn main() -> DecoderResult<()> {
 
     // set up a stream between the decoder and the audio output
     let (sender, reciever) = crossbeam_channel::bounded(2);
-    let (seek, seek_reciever) = crossbeam_channel::unbounded();
 
     // set up a handle to activate or deactivate the volume
     let volume_handle = effect::Volume::create_handle(0.5);
@@ -36,24 +34,10 @@ fn main() -> DecoderResult<()> {
         let decoder = sauti::decoder::default();
         let mut stream = decoder.read(Path::new(&path))?;
 
-        // TODO: so many levels of nesting
-        loop {
-            let packet = stream.next_packet()?;
-            let Some(packet) = packet else { break };
-
-            crossbeam_channel::select! {
-                send(sender, packet) -> _ => (),
-                recv(seek_reciever) -> message => {
-                    if message.expect("message sender hung up") {
-                        stream.seek_to(Duration::from_secs(30)).expect("failed to seek");
-                    }
-                }
-            }
-        }
-        // while (stream.next_packet()?)
-        //     .and_then(|packet| sender.send(packet).ok())
-        //     .is_some()
-        // {}
+        while (stream.next_packet()?)
+            .and_then(|packet| sender.send(packet).ok())
+            .is_some()
+        {}
 
         // the audio is done, stop outputting
         drop(device);
@@ -61,18 +45,6 @@ fn main() -> DecoderResult<()> {
         println!("finished!");
         Ok(())
     });
-
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    seek.send(true).expect("failed");
-
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    seek.send(true).expect("failed");
 
     std::io::stdin()
         .read_line(&mut String::new())

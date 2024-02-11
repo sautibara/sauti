@@ -5,13 +5,13 @@ use symphonia::core::{
     codecs::{CodecRegistry, DecoderOptions},
     errors::SeekErrorKind,
     formats::{FormatOptions, FormatReader, SeekMode},
-    io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions},
+    io::{MediaSource as SymphoniaSource, MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
     probe::{Hint, Probe},
     units::Time,
 };
 
-use super::{prelude::*, SeekError, Source};
+use super::{prelude::*, ErrorSource, SeekError};
 
 pub struct Symphonia {
     probe: Probe,
@@ -34,8 +34,8 @@ impl Default for Symphonia {
 impl Symphonia {
     fn read_source(
         &self,
-        source: Box<dyn MediaSource>,
-        error_source: Source,
+        source: Box<dyn SymphoniaSource>,
+        error_source: ErrorSource,
         hint: &Hint,
     ) -> DecoderResult<Box<dyn AudioStream>> {
         let source = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
@@ -72,28 +72,29 @@ impl Symphonia {
 }
 
 impl Decoder for Symphonia {
-    fn read(&self, path: &std::path::Path) -> super::DecoderResult<Box<dyn super::AudioStream>> {
-        let source = Box::new(File::open(path)?);
-
+    fn read(&self, source: &MediaSource) -> super::DecoderResult<Box<dyn super::AudioStream>> {
+        let error_source = source.into();
         let mut hint = Hint::new();
-        // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it does
-        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-            hint.with_extension(extension);
-        }
 
-        self.read_source(source, Source::File(path.to_owned()), &hint)
-    }
+        let symphonia_source: Box<dyn SymphoniaSource> = match source {
+            MediaSource::Path(path) => {
+                // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it does
+                if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                    hint.with_extension(extension);
+                }
 
-    fn read_buf(&self, buf: &[u8]) -> DecoderResult<Box<dyn AudioStream>> {
-        let buf: Box<[u8]> = buf.iter().copied().collect();
-        let source = Box::new(Cursor::new(buf));
-        self.read_source(source, Source::Buffer, &Hint::new())
+                Box::new(File::open(path)?)
+            }
+            MediaSource::Buffer(buf) => Box::new(Cursor::new(buf.clone())),
+        };
+
+        self.read_source(symphonia_source, error_source, &hint)
     }
 }
 
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;
 struct Stream {
-    error_source: Source,
+    error_source: ErrorSource,
     file: Box<dyn FormatReader>,
     decoder: Box<dyn SymphoniaDecoder>,
 }
@@ -179,7 +180,7 @@ impl<S: ConvertibleSample + SymphoniaSample> From<&AudioBuffer<S>> for SoundPack
 }
 
 use symphonia::core::errors::Error as SymphoniaError;
-fn map_error_with_source(error: SymphoniaError, source: &Source) -> DecoderError {
+fn map_error_with_source(error: SymphoniaError, source: &ErrorSource) -> DecoderError {
     match error {
         SymphoniaError::IoError(error) => DecoderError::IoError(error),
         SymphoniaError::DecodeError(reason) => DecoderError::MalformedData {

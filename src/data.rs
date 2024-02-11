@@ -1,5 +1,6 @@
 //! Various data structures that are used throughout the crate
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::path::{Path, PathBuf};
 // TODO: example
 use std::{cmp::Ordering, convert::identity, ops::Range};
 
@@ -17,7 +18,9 @@ pub use dasp_sample::{FromSample, Sample, ToSample};
 /// Every other module's prelude already exports this, so it's rare that it will have to be
 /// imported by itself
 pub mod prelude {
-    pub use super::{ConvertibleSample, GenericPacket, Sample, SoundPacket, StreamSpec};
+    pub use super::{
+        ConvertibleSample, GenericPacket, MediaSource, Sample, SoundPacket, StreamSpec,
+    };
 }
 
 /// Supertrait of [`Sample`] and conversions from all others
@@ -77,6 +80,34 @@ impl<T> ConvertibleSample for T where
         + Sync
         + 'static
 {
+}
+
+#[derive(Debug, Clone)]
+pub enum MediaSource {
+    Path(PathBuf),
+    Buffer(Box<[u8]>),
+}
+
+impl MediaSource {
+    #[must_use]
+    pub fn copy_buf(buf: &[u8]) -> Self {
+        Self::Buffer(buf.iter().copied().collect())
+    }
+}
+
+impl<T: AsRef<Path>> From<T> for MediaSource {
+    fn from(value: T) -> Self {
+        Self::Path(value.as_ref().to_owned())
+    }
+}
+
+impl Display for MediaSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Path(path) => write!(f, "path `{}`", path.display()),
+            Self::Buffer(_) => write!(f, "buffer"),
+        }
+    }
 }
 
 /// Stores information about an audio stream

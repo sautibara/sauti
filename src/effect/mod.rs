@@ -18,6 +18,13 @@ pub mod prelude {
     pub use crate::effect;
 }
 
+#[must_use]
+pub fn default() -> self::Default {
+    ResizeChannels.then(Resample::default())
+}
+
+pub type Default = List<ResizeChannels, Resample>;
+
 pub trait Effect: Clone + Send + 'static {
     fn apply_to<S: ConvertibleSample>(
         &mut self,
