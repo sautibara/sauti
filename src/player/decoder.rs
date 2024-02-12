@@ -24,14 +24,12 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         }
     }
 
-    pub fn send_next_packet(&mut self) {
-        // get the next packet
+    pub fn send_next_packet(&mut self) -> bool {
         let Some(packet) = self.next_packet() else {
-            return;
+            return false;
         };
 
-        // We don't care if nobody is listening
-        let _ = self.packet_sender.send(packet);
+        self.packet_sender.send(packet).is_ok()
     }
 
     fn next_packet(&mut self) -> Option<GenericPacket> {

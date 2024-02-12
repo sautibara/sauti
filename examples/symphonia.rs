@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sauti::{audio::prelude::*, decoder::prelude::*, effect::prelude::*};
 
@@ -32,7 +32,7 @@ fn main() -> DecoderResult<()> {
             .expect("failed to start outputting sound");
 
         let decoder = sauti::decoder::default();
-        let mut stream = decoder.read(Path::new(&path))?;
+        let mut stream = decoder.read(&MediaSource::Path(Path::new(&path).to_owned()))?;
 
         while (stream.next_packet()?)
             .and_then(|packet| sender.send(packet).ok())

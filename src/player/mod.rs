@@ -16,6 +16,7 @@ use crate::decoder::prelude::*;
 use crate::effect::prelude::*;
 
 use self::audio::PacketPlayer;
+use self::builder::{Builder, DefaultAudio, DefaultDecoder, DefaultEffect};
 use self::decoder::PlayerDecoder;
 
 mod audio;
@@ -65,13 +66,17 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
     ///
     /// - If there was an issue starting audio output
     pub fn run_blocking(self) -> Result<(), AudioError> {
-        let (packet_sender, packet_receiver) = crossbeam_channel::bounded(2);
+        let (packet_sender, packet_receiver) = crossbeam_channel::bounded(1);
 
         let source = PacketPlayer::new(&self, packet_receiver);
         let mut device = self.audio.start(self.options.clone(), source)?;
         let mut decode = PlayerDecoder::new(&self, packet_sender);
 
-        while self.tick(&mut device, &mut decode).is_continue() {}
+        let mut state = State::default();
+        while self
+            .tick(&mut device, &mut decode, &mut state)
+            .is_continue()
+        {}
 
         Ok(())
     }
@@ -79,21 +84,51 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
     fn tick(
         &self,
         _device: &mut Box<dyn Device>,
-        decoder: &mut PlayerDecoder<'_, D>,
+        decoder: &mut PlayerDecoder<D>,
+        state: &mut State,
     ) -> ControlFlow<()> {
-        // TODO: refactor to use select
-        // at least before implementing pausing and playing
         match self.handle.try_recv() {
-            Ok(Message::Play(source)) => decoder.decode(&source),
-            Ok(_) => todo!(),
+            Ok(message) => Self::handle(message, decoder, state),
             Err(TryRecvError::Empty) => (),
             Err(TryRecvError::Disconnected) => return ControlFlow::Break(()),
         }
 
         // NOTE: this blocks until the packet is sent
-        decoder.send_next_packet();
+        // if it doesn't send (and thus returns false),
+        // then it blocks on the message reciever
+        if !(state.playing && decoder.send_next_packet()) {
+            let Ok(message) = self.handle.recv() else {
+                return ControlFlow::Break(());
+            };
+            Self::handle(message, decoder, state);
+        }
 
         ControlFlow::Continue(())
+    }
+
+    fn handle(message: Message, decoder: &mut PlayerDecoder<D>, state: &mut State) {
+        match message {
+            Message::Play(source) => decoder.decode(&source),
+            Message::Pause => state.playing = false,
+            Message::Resume => state.playing = true,
+        }
+    }
+}
+
+impl Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default> {
+    #[must_use]
+    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
+        Builder::default()
+    }
+}
+
+struct State {
+    playing: bool,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self { playing: true }
     }
 }
 
