@@ -107,7 +107,7 @@ pub trait Device {
     ///
     /// - If the device is not available anymore
     /// - Other backend-specific errors
-    fn play(&mut self) -> AudioResult<()>;
+    fn resume(&mut self) -> AudioResult<()>;
     /// # Errors
     ///
     /// - If the device is not available anymore

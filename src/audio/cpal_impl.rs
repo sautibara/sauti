@@ -327,10 +327,10 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         self.stream = stream; // old stream drops and disconnects
 
         // start the stream again
-        self.play()
+        self.resume()
     }
 
-    fn play(&mut self) -> AudioResult<()> {
+    fn resume(&mut self) -> AudioResult<()> {
         self.stream
             .play()
             .map_err(|err| play_stream_error(err, &self.device))
