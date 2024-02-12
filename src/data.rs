@@ -149,6 +149,23 @@ impl GenericPacket {
     pub fn convert<N: ConvertibleSample>(self) -> SoundPacket<N> {
         self.into()
     }
+
+    /// Get the [`StreamSpec`] for this packet
+    #[must_use]
+    pub const fn spec(&self) -> &StreamSpec {
+        match self {
+            Self::I8(packets) => packets.spec(),
+            Self::I16(packets) => packets.spec(),
+            Self::I32(packets) => packets.spec(),
+            Self::I64(packets) => packets.spec(),
+            Self::U8(packets) => packets.spec(),
+            Self::U16(packets) => packets.spec(),
+            Self::U32(packets) => packets.spec(),
+            Self::U64(packets) => packets.spec(),
+            Self::F32(packets) => packets.spec(),
+            Self::F64(packets) => packets.spec(),
+        }
+    }
 }
 
 impl<N: ConvertibleSample> From<GenericPacket> for SoundPacket<N> {
@@ -266,6 +283,11 @@ impl<S: ConvertibleSample> SoundPacket<S> {
             for (frame, sample) in samples.as_ref().iter().take(frames).enumerate() {
                 self.interleaved_samples[frame * channels + channel] = *sample;
             }
+        }
+
+        if self.interleaved_samples.len() > channels * frames {
+            self.interleaved_samples
+                .resize(channels * frames, S::EQUILIBRIUM);
         }
     }
 
