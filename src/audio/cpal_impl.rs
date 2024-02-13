@@ -330,16 +330,22 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         self.resume()
     }
 
-    fn resume(&mut self) -> AudioResult<()> {
-        self.stream
-            .play()
-            .map_err(|err| play_stream_error(err, &self.device))
+    fn pause(&mut self) -> AudioResult<()> {
+        // FIXME: currently, cpal doesn't clear out the audio buffer when pausing, so some audio
+        // plays after the stream resumes after a stop. (see https://github.com/RustAudio/cpal/issues/807)
+        // because of this, the pausing functionality is just removed.
+
+        // self.stream
+        //     .pause()
+        //     .map_err(|err| pause_stream_error(err, &self.device))
+        Ok(())
     }
 
-    fn pause(&mut self) -> AudioResult<()> {
-        self.stream
-            .pause()
-            .map_err(|err| pause_stream_error(err, &self.device))
+    fn resume(&mut self) -> AudioResult<()> {
+        // self.stream
+        //     .play()
+        //     .map_err(|err| play_stream_error(err, &self.device))
+        Ok(())
     }
 
     fn info(&self) -> &DeviceInfo {
@@ -465,6 +471,7 @@ fn play_stream_error(err: cpal::PlayStreamError, device: &cpal::Device) -> Audio
     }
 }
 
+#[allow(dead_code)] // for if cpal fixes bug #807
 fn pause_stream_error(err: cpal::PauseStreamError, device: &cpal::Device) -> AudioError {
     let name = match device.name() {
         Ok(name) => name,

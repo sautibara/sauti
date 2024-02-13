@@ -37,12 +37,17 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         Ok(())
     }
 
-    pub fn send_next_packet(&mut self) -> bool {
+    pub fn send_next_packet(&mut self) -> PlayerResult<bool> {
         let Some(packet) = self.next_packet() else {
-            return false;
+            // nothing was sent
+            return Ok(false);
         };
 
-        self.packet_sender.send(packet).is_ok()
+        match self.packet_sender.send(packet) {
+            // something was sent
+            Ok(()) => Ok(true),
+            Err(_) => Err(PlayerError::AudioDisconnected),
+        }
     }
 
     fn next_packet(&mut self) -> Option<GenericPacket> {

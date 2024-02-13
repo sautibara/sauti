@@ -59,6 +59,12 @@ impl Effect for Resample {
         let processed = resampler.process(input.convert());
         processed.convert()
     }
+
+    fn reset(&mut self) {
+        if let Some(inner) = &mut self.resampler {
+            inner.resampler.reset();
+        }
+    }
 }
 
 struct Inner {

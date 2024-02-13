@@ -374,7 +374,9 @@ impl<S: ConvertibleSample> SoundPacket<S> {
 
     #[must_use]
     pub fn frames(&self) -> usize {
-        self.interleaved_samples.len() / self.channels()
+        (self.interleaved_samples.len())
+            .checked_div(self.channels())
+            .unwrap_or(0)
     }
 
     /// Obtain an iterator over each frame of the packet

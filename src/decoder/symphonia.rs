@@ -8,7 +8,7 @@ use symphonia::core::{
     io::{MediaSource as SymphoniaSource, MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
     probe::{Hint, Probe},
-    units::Time,
+    units::{Time, TimeBase, TimeStamp},
 };
 
 use super::{prelude::*, ErrorSource, SeekError};
@@ -69,6 +69,10 @@ impl Symphonia {
             .codec_params
             .n_frames
             .ok_or_else(|| unsupported(&error_source))?;
+        let time_base = track
+            .codec_params
+            .time_base
+            .ok_or_else(|| unsupported(&error_source))?;
 
         let stream = Stream {
             file: reader.format,
@@ -77,6 +81,7 @@ impl Symphonia {
             sample_rate: sample_rate as usize,
             frame_count: usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
             error_source,
+            time_base,
         };
 
         Ok(Box::new(stream))
@@ -112,6 +117,7 @@ struct Stream {
     current_frame: usize,
     frame_count: usize,
     sample_rate: usize,
+    time_base: TimeBase,
 }
 
 impl AudioStream for Stream {
@@ -134,7 +140,8 @@ impl AudioStream for Stream {
         let secs = duration.as_secs();
         let subsecs = duration.as_secs_f64().fract();
         let time = Time::new(secs, subsecs);
-        self.file
+        let seeked_to = self
+            .file
             .seek(
                 SeekMode::Coarse,
                 symphonia::core::formats::SeekTo::Time {
@@ -143,6 +150,8 @@ impl AudioStream for Stream {
                 },
             )
             .map_err(|err| map_error_with_source(err, &self.error_source))?;
+        self.decoder.reset();
+        self.current_frame = self.time_stamp_to_frame(seeked_to.actual_ts);
         Ok(())
     }
 
@@ -152,6 +161,18 @@ impl AudioStream for Stream {
 
     fn duration(&self) -> Duration {
         super::frame_to_duration(self.frame_count, self.sample_rate)
+    }
+}
+
+impl Stream {
+    #[allow(clippy::cast_possible_truncation)] // it's fine
+    const fn time_stamp_to_frame(&self, time_stamp: TimeStamp) -> usize {
+        if self.time_base.numer == 1 && self.time_base.denom as usize == self.sample_rate {
+            time_stamp as usize
+        } else {
+            time_stamp as usize * self.sample_rate * self.time_base.numer as usize
+                / self.time_base.denom as usize
+        }
     }
 }
 

@@ -32,6 +32,8 @@ pub trait Effect: Clone + Send + 'static {
         output_spec: &StreamSpec,
     ) -> SoundPacket<S>;
 
+    fn reset(&mut self) {}
+
     fn then<N: Effect>(self, next: N) -> List<Self, N>
     where
         Self: Sized,
@@ -65,6 +67,11 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
     ) -> SoundPacket<S> {
         let packet = self.current.apply_to(input, output_spec);
         self.next.apply_to(packet, output_spec)
+    }
+
+    fn reset(&mut self) {
+        self.current.reset();
+        self.next.reset();
     }
 }
 
