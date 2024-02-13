@@ -86,7 +86,42 @@ pub trait AudioStream {
     /// - If there's a backend-specific error
     fn seek_to(&mut self, duration: Duration) -> DecoderResult<()>;
 
-    fn duration(&self) -> Option<Duration>;
+    /// # Errors
+    ///
+    /// - If the stream is unseekable
+    /// - If the stream can only be seeked forward
+    /// - If the duration is out of the bounds of the stream
+    /// - If there's a backend-specific error
+    fn seek_by(&mut self, duration: Duration, direction: Direction) -> DecoderResult<()> {
+        let position = self.position();
+        let new = match direction {
+            Direction::Forward => position + duration,
+            Direction::Backward => position - duration,
+        };
+        self.seek_to(new)
+    }
+
+    fn position(&self) -> Duration;
+    fn duration(&self) -> Duration;
+}
+
+#[derive(Clone, Copy)]
+pub enum Direction {
+    Forward,
+    Backward,
+}
+
+fn frame_to_duration(frame: usize, sample_rate: usize) -> Duration {
+    let secs = frame / sample_rate;
+    let remaining = frame % sample_rate;
+    let nanos = remaining * 1_000_000_000 / sample_rate;
+
+    Duration::new(
+        secs as u64,
+        nanos
+            .try_into()
+            .expect("nanos should only ever be less than 1_000_000_000"),
+    )
 }
 
 #[derive(std::default::Default)]

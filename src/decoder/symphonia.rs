@@ -61,10 +61,22 @@ impl Symphonia {
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|err| map_error_with_source(err, &error_source))?;
 
+        let sample_rate = track
+            .codec_params
+            .sample_rate
+            .ok_or_else(|| unsupported(&error_source))?;
+        let frame_count = track
+            .codec_params
+            .n_frames
+            .ok_or_else(|| unsupported(&error_source))?;
+
         let stream = Stream {
-            error_source,
             file: reader.format,
             decoder,
+            current_frame: 0,
+            sample_rate: sample_rate as usize,
+            frame_count: usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
+            error_source,
         };
 
         Ok(Box::new(stream))
@@ -97,6 +109,9 @@ struct Stream {
     error_source: ErrorSource,
     file: Box<dyn FormatReader>,
     decoder: Box<dyn SymphoniaDecoder>,
+    current_frame: usize,
+    frame_count: usize,
+    sample_rate: usize,
 }
 
 impl AudioStream for Stream {
@@ -110,6 +125,7 @@ impl AudioStream for Stream {
         let symphonia_packet = (self.decoder)
             .decode(&undecoded_packet)
             .map_err(|err| map_error_with_source(err, &self.error_source))?;
+        self.current_frame += symphonia_packet.frames();
         let packet = symphonia_packet.into();
         Ok(Some(packet))
     }
@@ -130,16 +146,12 @@ impl AudioStream for Stream {
         Ok(())
     }
 
-    fn duration(&self) -> Option<Duration> {
-        let track = &self.file.default_track()?.codec_params;
-        let frames = track.n_frames?;
-        let sample_rate = u64::from(track.sample_rate?);
+    fn position(&self) -> Duration {
+        super::frame_to_duration(self.current_frame, self.sample_rate)
+    }
 
-        let secs = frames / sample_rate;
-        let remaining = frames % sample_rate;
-        let nanos = remaining * 1_000_000_000 / sample_rate;
-
-        Some(Duration::new(secs, nanos.try_into().unwrap_or(0)))
+    fn duration(&self) -> Duration {
+        super::frame_to_duration(self.frame_count, self.sample_rate)
     }
 }
 
@@ -197,6 +209,10 @@ fn map_error_with_source(error: SymphoniaError, source: &ErrorSource) -> Decoder
             DecoderError::Other(Some("decoder needs reset".to_string()))
         }
     }
+}
+
+fn unsupported(error_source: &ErrorSource) -> DecoderError {
+    DecoderError::UnsupportedFormat(error_source.clone())
 }
 
 impl From<SeekErrorKind> for SeekError {
