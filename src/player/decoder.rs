@@ -1,7 +1,7 @@
 use crossbeam_channel::Sender;
 use log::error;
 
-use super::Player;
+use super::prelude::*;
 use crate::decoder::prelude::*;
 
 // it conflicts with the other decoder module
@@ -22,6 +22,19 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
             packet_sender,
             current_stream: None,
         }
+    }
+
+    pub fn modify_stream<E>(
+        &mut self,
+        func: impl FnOnce(&mut Box<dyn AudioStream>) -> Result<(), E>,
+    ) -> PlayerResult<()>
+    where
+        PlayerError: From<E>,
+    {
+        if let Some(stream) = &mut self.current_stream {
+            func(stream)?;
+        }
+        Ok(())
     }
 
     pub fn send_next_packet(&mut self) -> bool {
