@@ -152,7 +152,7 @@ pub trait DeviceExt: Deref<Target = dyn Device> {
     /// - If the old options don't work anymore
     /// - Other errors can occur while [restarting](Device::restart)
     fn try_merge_options(&mut self, options: DeviceOptions) -> AudioResult<()> {
-        self.merge_options(options.with_backup(self.info().clone()))
+        self.merge_options(options.with_backup(*self.info()))
     }
 }
 
@@ -218,7 +218,7 @@ impl SoundSource for Silence {
 }
 
 /// Information about the current sound device
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeviceInfo {
     pub sample_rate: usize,
     pub sample_format: SampleFormat,
