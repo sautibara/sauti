@@ -129,7 +129,6 @@ impl From<DeviceInfo> for StreamSpec {
 /// A generic form of [`SoundPacket`]
 ///
 /// Use [`Self::convert`] to turn this into a more useable type
-#[must_use]
 #[derive(Clone)]
 pub enum GenericPacket {
     I8(SoundPacket<i8>),
@@ -181,6 +180,24 @@ impl<N: ConvertibleSample> From<GenericPacket> for SoundPacket<N> {
             GenericPacket::U64(packets) => packets.convert(),
             GenericPacket::F32(packets) => packets.convert(),
             GenericPacket::F64(packets) => packets.convert(),
+        }
+    }
+}
+
+impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
+    fn from(value: SoundPacket<S>) -> Self {
+        match S::FORMAT {
+            SampleFormat::I8 => Self::I8(value.convert()),
+            SampleFormat::I16 => Self::I16(value.convert()),
+            SampleFormat::I32 => Self::I32(value.convert()),
+            SampleFormat::I64 => Self::I64(value.convert()),
+            SampleFormat::U8 => Self::U8(value.convert()),
+            SampleFormat::U16 => Self::U16(value.convert()),
+            SampleFormat::U32 => Self::U32(value.convert()),
+            SampleFormat::U64 => Self::U64(value.convert()),
+            SampleFormat::F32 => Self::F32(value.convert()),
+            SampleFormat::F64 => Self::F64(value.convert()),
+            _ => unimplemented!("generic packet of that type not implemented yet"),
         }
     }
 }
