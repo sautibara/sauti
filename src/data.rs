@@ -1,5 +1,6 @@
 //! Various data structures that are used throughout the crate
 use std::fmt::{Debug, Display};
+use std::iter::once;
 use std::path::{Path, PathBuf};
 // TODO: example
 use std::{cmp::Ordering, convert::identity, ops::Range};
@@ -12,6 +13,7 @@ pub use cpal::SampleFormat;
 pub use cpal::SizedSample;
 
 pub use dasp_sample::{FromSample, Sample, ToSample};
+use thiserror::Error;
 
 /// Some useful things to have when working with the different data types in this crate
 ///
@@ -19,7 +21,8 @@ pub use dasp_sample::{FromSample, Sample, ToSample};
 /// imported by itself
 pub mod prelude {
     pub use super::{
-        ConvertibleSample, GenericPacket, MediaSource, Sample, SoundPacket, StreamSpec,
+        ConvertibleSample, GenericPacket, MediaSource, Sample, SampleFormat, SoundPacket,
+        StreamSpec,
     };
 }
 
@@ -82,6 +85,7 @@ impl<T> ConvertibleSample for T where
 {
 }
 
+/// A source for a sound file
 #[derive(Debug, Clone)]
 pub enum MediaSource {
     Path(PathBuf),
@@ -89,6 +93,7 @@ pub enum MediaSource {
 }
 
 impl MediaSource {
+    /// Create [`Self`] by copying `buf` into a [`Box`]
     #[must_use]
     pub fn copy_buf(buf: &[u8]) -> Self {
         Self::Buffer(buf.iter().copied().collect())
@@ -111,7 +116,7 @@ impl Display for MediaSource {
 }
 
 /// Stores information about an audio stream
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StreamSpec {
     pub channels: usize,
     pub sample_rate: usize,
@@ -129,7 +134,7 @@ impl From<DeviceInfo> for StreamSpec {
 /// A generic form of [`SoundPacket`]
 ///
 /// Use [`Self::convert`] to turn this into a more useable type
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GenericPacket {
     I8(SoundPacket<i8>),
     I16(SoundPacket<i16>),
@@ -143,49 +148,100 @@ pub enum GenericPacket {
     F64(SoundPacket<f64>),
 }
 
+macro_rules! get {
+    ($val:ident => |$packets:ident| $expr:expr) => {
+        match $val {
+            GenericPacket::I8($packets) => $expr,
+            GenericPacket::I16($packets) => $expr,
+            GenericPacket::I32($packets) => $expr,
+            GenericPacket::I64($packets) => $expr,
+            GenericPacket::U8($packets) => $expr,
+            GenericPacket::U16($packets) => $expr,
+            GenericPacket::U32($packets) => $expr,
+            GenericPacket::U64($packets) => $expr,
+            GenericPacket::F32($packets) => $expr,
+            GenericPacket::F64($packets) => $expr,
+        }
+    };
+}
+
 impl GenericPacket {
     /// Convert this packet into a typed [`SoundPacket`]
-    pub fn convert<N: ConvertibleSample>(self) -> SoundPacket<N> {
+    pub fn convert<N: ConvertibleSample>(&self) -> SoundPacket<N> {
         self.into()
     }
 
     /// Get the [`StreamSpec`] for this packet
     #[must_use]
     pub const fn spec(&self) -> &StreamSpec {
+        get!(self => |packet| packet.spec())
+    }
+
+    /// Get the number of frames that this packet contains
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        get!(self => |packet| packet.frames())
+    }
+
+    /// Get the underlying [`SampleFormat`] of the packet
+    #[must_use]
+    pub const fn sample_format(&self) -> SampleFormat {
         match self {
-            Self::I8(packets) => packets.spec(),
-            Self::I16(packets) => packets.spec(),
-            Self::I32(packets) => packets.spec(),
-            Self::I64(packets) => packets.spec(),
-            Self::U8(packets) => packets.spec(),
-            Self::U16(packets) => packets.spec(),
-            Self::U32(packets) => packets.spec(),
-            Self::U64(packets) => packets.spec(),
-            Self::F32(packets) => packets.spec(),
-            Self::F64(packets) => packets.spec(),
+            Self::I8(_) => SampleFormat::I8,
+            Self::I16(_) => SampleFormat::I16,
+            Self::I32(_) => SampleFormat::I32,
+            Self::I64(_) => SampleFormat::I64,
+            Self::U8(_) => SampleFormat::U8,
+            Self::U16(_) => SampleFormat::U16,
+            Self::U32(_) => SampleFormat::U32,
+            Self::U64(_) => SampleFormat::U64,
+            Self::F32(_) => SampleFormat::F32,
+            Self::F64(_) => SampleFormat::F64,
         }
+    }
+
+    /// Convert the underlying sample format to be `format`
+    #[must_use]
+    pub fn convert_to(&self, format: SampleFormat) -> Self {
+        match format {
+            SampleFormat::I8 => Self::I8(self.convert()),
+            SampleFormat::I16 => Self::I16(self.convert()),
+            SampleFormat::I32 => Self::I32(self.convert()),
+            SampleFormat::I64 => Self::I64(self.convert()),
+            SampleFormat::U8 => Self::U8(self.convert()),
+            SampleFormat::U16 => Self::U16(self.convert()),
+            SampleFormat::U32 => Self::U32(self.convert()),
+            SampleFormat::U64 => Self::U64(self.convert()),
+            SampleFormat::F32 => Self::F32(self.convert()),
+            SampleFormat::F64 => Self::F64(self.convert()),
+            _ => todo!("GenericPacket cannot hold this type of format yet"),
+        }
+    }
+
+    /// Returns `true` if `self` is "equivalent" to `other`
+    ///
+    /// The underlying sample formats don't have to be the same, but once converted to the same format,
+    /// the samples must be equal to each other.
+    #[must_use]
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.convert_to(other.sample_format()) == *other
+    }
+}
+
+impl<N: ConvertibleSample> From<&GenericPacket> for SoundPacket<N> {
+    fn from(value: &GenericPacket) -> Self {
+        get!(value => |packet| packet.convert())
     }
 }
 
 impl<N: ConvertibleSample> From<GenericPacket> for SoundPacket<N> {
     fn from(value: GenericPacket) -> Self {
-        match value {
-            GenericPacket::I8(packets) => packets.convert(),
-            GenericPacket::I16(packets) => packets.convert(),
-            GenericPacket::I32(packets) => packets.convert(),
-            GenericPacket::I64(packets) => packets.convert(),
-            GenericPacket::U8(packets) => packets.convert(),
-            GenericPacket::U16(packets) => packets.convert(),
-            GenericPacket::U32(packets) => packets.convert(),
-            GenericPacket::U64(packets) => packets.convert(),
-            GenericPacket::F32(packets) => packets.convert(),
-            GenericPacket::F64(packets) => packets.convert(),
-        }
+        (&value).into()
     }
 }
 
-impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
-    fn from(value: SoundPacket<S>) -> Self {
+impl<S: ConvertibleSample> From<&SoundPacket<S>> for GenericPacket {
+    fn from(value: &SoundPacket<S>) -> Self {
         match S::FORMAT {
             SampleFormat::I8 => Self::I8(value.convert()),
             SampleFormat::I16 => Self::I16(value.convert()),
@@ -202,6 +258,12 @@ impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
     }
 }
 
+impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
+    fn from(value: SoundPacket<S>) -> Self {
+        (&value).into()
+    }
+}
+
 /// An immutable packet of sound data, potentially with multiple channels
 ///
 /// Terminology:
@@ -215,7 +277,7 @@ impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
 /// The packet also includes a [`StreamSpec`] that holds information about the stream (most notably
 /// its sample rate)
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SoundPacket<S: ConvertibleSample> {
     interleaved_samples: Vec<S>,
     spec: StreamSpec,
@@ -626,3 +688,45 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         self
     }
 }
+
+impl<S: ConvertibleSample> FromIterator<SoundPacket<S>>
+    for Option<Result<SoundPacket<S>, SpecMismatch>>
+{
+    fn from_iter<T: IntoIterator<Item = SoundPacket<S>>>(iter: T) -> Self {
+        let mut packets = iter.into_iter();
+        let first = packets.next()?;
+        let packet = packets.try_fold(first, |mut previous, current| {
+            if previous.spec() == current.spec() {
+                previous
+                    .interleaved_samples
+                    .extend_from_slice(&current.interleaved_samples[..]);
+                Ok(previous)
+            } else {
+                Err(SpecMismatch)
+            }
+        });
+        Some(packet)
+    }
+}
+
+impl FromIterator<GenericPacket> for Option<Result<GenericPacket, SpecMismatch>> {
+    fn from_iter<T: IntoIterator<Item = GenericPacket>>(iter: T) -> Self {
+        let mut packets = iter.into_iter();
+        let first = packets.next()?;
+        get!(first => |first| {
+            let list = once(first).chain(packets.map(|packet| packet.convert()));
+            let packet: Option<Result<SoundPacket<_>, _>> = list.collect();
+            match packet {
+                Some(Ok(packet)) => Some(Ok(GenericPacket::from(packet))),
+                Some(Err(e)) => Some(Err(e)),
+                None => None,
+            }
+        })
+    }
+}
+
+/// An error for when sound packets with different [`StreamSpec`]s try to be collected into a
+/// single packet
+#[derive(Debug, Error)]
+#[error("Tried to collect sound packets with different StreamSpecs into a single packet")]
+pub struct SpecMismatch;
