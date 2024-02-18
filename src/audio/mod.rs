@@ -1,23 +1,21 @@
-#![allow(clippy::needless_doctest_main)] // meant to show an example
+#![allow(clippy::needless_doctest_main)] // the SoundSource impl is too large
 //! Low-level audio handling
 //!
 //! # Examples
 //!
-//! ```no_run
+//! ```
 //! use sauti::audio::prelude::*;
+//! use sauti::test::prelude::*;
 //!
-//! // this program outputs a 440.0 hz sin wave on the main device
 //! fn main() {
-//!     // start outputting sound on the default device
-//!     let audio = sauti::audio::default();
-//!     let _device = audio
-//!         .start(DeviceOptions::default(), Beep { frequency: 440.0 })
+//!     let (collector, handle) = Collector::take(4);
+//!     let _device = collector
+//!         .start(DeviceOptions::default().as_mono(), Beep { frequency: 11025.0 })
 //!         .expect("failed to start outputting sound");
+//!         
+//!     let packet = handle.collect().convert::<i8>();
 //!
-//!     // wait for something in the console, ignore it, and then exit
-//!     std::io::stdin()
-//!         .read_line(&mut String::new())
-//!         .expect("failed to read stdin");
+//!     assert_eq!(packet, SoundPacket::from_channels(&[&[127, 0, -128, 0]], 44100));
 //! }
 //!
 //! struct Beep {
@@ -42,7 +40,7 @@
 //!             let val =
 //!                 (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
 //!             // S::from_sample must be used to convert the f64 value to the generic sample type
-//!             channels.fill(S::from_sample(val * 0.1));
+//!             channels.fill(S::from_sample(val));
 //!         }
 //!     }
 //! }
@@ -337,6 +335,14 @@ impl DeviceOptions {
     with!( func_name: with_default_sample_rate, field: sample_rate, default: true );
     with!( func_name: with_default_sample_format, field: sample_format, default: true );
     with!( func_name: with_default_channel_count, field: channels, default: true );
+
+    pub fn as_stereo(self) -> Self {
+        self.with_channel_count(2)
+    }
+
+    pub fn as_mono(self) -> Self {
+        self.with_channel_count(1)
+    }
 
     pub fn with_default_as_backup(self) -> Self {
         self.with_backup(Self::default())
