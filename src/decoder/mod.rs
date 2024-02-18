@@ -4,6 +4,21 @@
 //!
 //! ```
 //! use sauti::decoder::prelude::*;
+//!
+//! let decoder = sauti::decoder::default();
+//!
+//! // the test file holds a 22050hz square wave (switches every sample)
+//! let source = MediaSource::copy_buf(include_bytes!("../test/test_file.flac"));
+//! let file = (decoder.read(&source))
+//!     .and_then(|mut file| file.decode_all())
+//!     .expect("failed to decode file")
+//!     .expect("file should have at least one packet");
+//!
+//! let (max, min) = (i8::MAX, i8::MIN);
+//! assert_eq!(
+//!     file.convert::<i8>(),
+//!     SoundPacket::from_channels(&[&[max, min, max, min]], 44100)
+//! );
 //! ```
 
 use std::{default::Default as _, fmt::Debug, path::PathBuf, time::Duration};
@@ -14,25 +29,33 @@ use crate::data::GenericPacket;
 
 mod symphonia;
 
+/// Useful things for interacting with a [`Decoder`]
 pub mod prelude {
-    pub use super::{AudioStream, Decoder, DecoderError, DecoderResult};
+    pub use super::{AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult};
     pub use crate::data::prelude::*;
 }
 
+/// A decoder implemented using [`symphonia`](::symphonia)
 pub use symphonia::Symphonia;
 
 use self::prelude::*;
 
+/// Get the default [`Decoder`]
 #[must_use]
 pub fn default() -> self::Default {
     Symphonia::default()
 }
 
+/// The output type of [`default`]
 pub type Default = Symphonia;
 
-// NOTE: for implementors: read and read_fallible + buf_read and buf_read_fallible are defined in
-// terms of each other. It's expected for the implementor to either implement read and buf_read or
-// read_fallible and buf_read_fallible, letting the default implementation get the other side
+/// A type that can [`read`](Self::read) and decode a [`MediaSource`], returning [`AudioStream`]
+///
+/// # Implementors
+///
+/// [`Self::read`] and [`Self::read_fallible`] are reflexively defined in terms of each other. It's
+/// expected for the implementor to implement one of them and let the default implementation handle
+/// the other.
 pub trait Decoder: Send + 'static {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
     ///
@@ -63,13 +86,18 @@ pub trait Decoder: Send + 'static {
     }
 }
 
-// TODO: guarantee that the number of frames will be about equal
+/// A decoded stream of audio
+///
+/// The next packet of the stream can be obtained using [`Self::next_packet`],
+/// or the entire stream can be decoded into a single packet using [`AudioStreamExt::decode_all`].
+///
+/// There are also various utilities for modifying the stream
 pub trait AudioStream {
     /// Get the next packet of data from the stream
     ///
     /// The packets are guaranteed to be:
     /// - Fairly small (so that [effects](crate::effect) aren't too intensive)
-    /// - A consistent size (for effects that [need this](crate::effect::ResizeChannels))
+    /// - A consistent size ([for effects that need a consistent size](crate::effect::Resample))
     ///
     /// # Errors
     ///
@@ -78,6 +106,8 @@ pub trait AudioStream {
     /// - If there is a backend-specific error
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>>;
 
+    /// Seek the stream to a given `duration`, measured from the start
+    ///
     /// # Errors
     ///
     /// - If the stream is unseekable
@@ -86,6 +116,8 @@ pub trait AudioStream {
     /// - If there's a backend-specific error
     fn seek_to(&mut self, duration: Duration) -> DecoderResult<()>;
 
+    /// Seek the stream from the current position by a given `duration` in either `direction`
+    ///
     /// # Errors
     ///
     /// - If the stream is unseekable
@@ -101,17 +133,67 @@ pub trait AudioStream {
         self.seek_to(new)
     }
 
+    /// Measure the current position of the stream, in seconds
+    ///
+    /// The position is measured as the duration from the start of the stream
+    /// to the end of the last given packet
     fn position(&self) -> Duration;
+    /// Measure the full duration of the stream, in seconds
     fn duration(&self) -> Duration;
 }
 
+/// Extra methods for [`AudioStream`] trait objects, ex: [`Box<dyn AudioStream>`]
+pub trait AudioStreamExt {
+    /// Get an iterator over every packet
+    ///
+    /// The iterator returns [`DecoderResult<GenericPacket>`]
+    fn iter(&mut self) -> Iter<'_>;
+
+    /// Decode every packet left, combining them into a single packet
+    ///
+    /// # Errors
+    ///
+    /// - If the [`StreamSpec`]s of the packets don't match ([`SpecMismatch`](DecoderError::SpecMismatch))
+    /// - If there are other errors while decoding (see [`AudioStream::next_packet`])
+    /// - Returns [`None`] if there are no more packets in the stream
+    fn decode_all(&mut self) -> DecoderResult<Option<GenericPacket>> {
+        self.iter()
+            .collect::<Result<Option<Result<_, _>>, _>>()?
+            .transpose()
+            .map_err(|_| DecoderError::SpecMismatch)
+    }
+}
+
+impl AudioStreamExt for Box<dyn AudioStream> {
+    fn iter(&mut self) -> Iter<'_> {
+        Iter { stream: self }
+    }
+}
+
+/// An iterator over packets returned by an [`AudioStream`]
+///
+/// Obtained using [`AudioStreamExt::iter`]
+pub struct Iter<'a> {
+    stream: &'a mut Box<dyn AudioStream>,
+}
+
+impl Iterator for Iter<'_> {
+    type Item = DecoderResult<GenericPacket>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.stream.next_packet().transpose()
+    }
+}
+
+/// A direction, either [forward](Self::Forward) or [backward](Self::Backward)
+///
+/// Used by [`AudioStream::seek_by`]
 #[derive(Clone, Copy)]
 pub enum Direction {
     Forward,
     Backward,
 }
 
-fn frame_to_duration(frame: usize, sample_rate: usize) -> Duration {
+pub(crate) fn frame_to_duration(frame: usize, sample_rate: usize) -> Duration {
     let secs = frame / sample_rate;
     let remaining = frame % sample_rate;
     let nanos = remaining * 1_000_000_000 / sample_rate;
@@ -124,6 +206,13 @@ fn frame_to_duration(frame: usize, sample_rate: usize) -> Duration {
     )
 }
 
+/// A list of decoders that are tried in order
+///
+/// This implements [`Decoder`] itself by sequentially checking each decoder -
+/// decoders closer to the start of the list are given priority.
+///
+/// If any decoder returns an [error](DecoderError) other than [`DecoderError::UnsupportedFormat`],
+/// then that error will be immediately returned (it short-circuits)
 #[derive(std::default::Default)]
 pub struct List {
     decoders: Vec<Box<dyn Decoder>>,
@@ -151,6 +240,7 @@ impl Decoder for List {
     }
 }
 
+/// Any error that can be occurred while decoding
 #[derive(Error, Debug)]
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
@@ -158,7 +248,7 @@ pub enum DecoderError {
     #[error("format of given {0:?} is not supported")]
     UnsupportedFormat(ErrorSource),
     #[error("io error: {0}")]
-    IoError(std::io::Error),
+    IoError(#[from] std::io::Error),
     #[error("malformed data in {source:?}: {}", reason.as_deref().unwrap_or("unknown"))]
     MalformedData {
         source: ErrorSource,
@@ -171,10 +261,13 @@ pub enum DecoderError {
         source: ErrorSource,
         reason: SeekError,
     },
+    #[error("tried to decode a file into one packet when the file had different StreamSpecs")]
+    SpecMismatch,
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
 }
 
+/// An error that can occur when [seeking](AudioStream::seek_to) an [`AudioStream`]
 #[derive(Error, Debug)]
 pub enum SeekError {
     #[error("file is unseekable")]
@@ -185,6 +278,7 @@ pub enum SeekError {
     ForwardOnly,
 }
 
+/// The [`MediaSource`] responsible for an error
 #[derive(Error, Debug, Clone)]
 pub enum ErrorSource {
     #[error("file '{0}'")]
@@ -202,12 +296,7 @@ impl From<&MediaSource> for ErrorSource {
     }
 }
 
-impl From<std::io::Error> for DecoderError {
-    fn from(v: std::io::Error) -> Self {
-        Self::IoError(v)
-    }
-}
-
+/// A result of an operation on a [`Decoder`]
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type DecoderResult<T> = Result<T, DecoderError>;
