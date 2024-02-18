@@ -4,13 +4,15 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::audio::prelude::*;
 
+/// An implementation of [`Audio`] that collects a given about of frames and sends them to a
+/// [`CollectorHandle`](Handle)
 #[derive(Clone)]
-pub struct Sink {
+pub struct Collector {
     sender: Sender<GenericPacket>,
     take: usize,
 }
 
-impl Sink {
+impl Collector {
     const DEFAULT_INFO: DeviceInfo = DeviceInfo {
         channels: 2,
         sample_format: SampleFormat::F32,
@@ -30,47 +32,51 @@ impl Sink {
     }
 }
 
+/// A handle for a [`Collector`] that can be used to recieve the collected packet through
+/// [`Self::collect`]
 pub struct Handle {
     reciever: Receiver<GenericPacket>,
 }
 
 impl Handle {
+    /// Recieve the collected packet, blocking until it's given
+    ///
     /// # Panics
     ///
     /// - If the audio sender hangs up before recieving enough frames
     #[must_use]
-    pub fn collect(&self) -> GenericPacket {
+    pub fn collect(self) -> GenericPacket {
         self.reciever
             .recv()
             .expect("audio hung up without sending a packet")
     }
 }
 
-impl Audio for Sink {
+impl Audio for Collector {
     fn start<B: SoundSource>(
         &self,
         options: impl Into<DeviceOptions>,
         source: B,
-    ) -> AudioResult<Box<dyn Device>> {
+    ) -> AudioResult<Box<dyn crate::audio::Device>> {
         let info = Self::DEFAULT_INFO.apply(&options.into());
         let device = match info.sample_format {
-            SampleFormat::I8 => SinkDevice::<i8, B>::start_new_boxed(self, info, source),
-            SampleFormat::I16 => SinkDevice::<i16, B>::start_new_boxed(self, info, source),
-            SampleFormat::I32 => SinkDevice::<i32, B>::start_new_boxed(self, info, source),
-            SampleFormat::I64 => SinkDevice::<i64, B>::start_new_boxed(self, info, source),
-            SampleFormat::U8 => SinkDevice::<u8, B>::start_new_boxed(self, info, source),
-            SampleFormat::U16 => SinkDevice::<u16, B>::start_new_boxed(self, info, source),
-            SampleFormat::U32 => SinkDevice::<u32, B>::start_new_boxed(self, info, source),
-            SampleFormat::U64 => SinkDevice::<u64, B>::start_new_boxed(self, info, source),
-            SampleFormat::F32 => SinkDevice::<f32, B>::start_new_boxed(self, info, source),
-            SampleFormat::F64 => SinkDevice::<f64, B>::start_new_boxed(self, info, source),
+            SampleFormat::I8 => Device::<i8, B>::start_new_boxed(self, info, source),
+            SampleFormat::I16 => Device::<i16, B>::start_new_boxed(self, info, source),
+            SampleFormat::I32 => Device::<i32, B>::start_new_boxed(self, info, source),
+            SampleFormat::I64 => Device::<i64, B>::start_new_boxed(self, info, source),
+            SampleFormat::U8 => Device::<u8, B>::start_new_boxed(self, info, source),
+            SampleFormat::U16 => Device::<u16, B>::start_new_boxed(self, info, source),
+            SampleFormat::U32 => Device::<u32, B>::start_new_boxed(self, info, source),
+            SampleFormat::U64 => Device::<u64, B>::start_new_boxed(self, info, source),
+            SampleFormat::F32 => Device::<f32, B>::start_new_boxed(self, info, source),
+            SampleFormat::F64 => Device::<f64, B>::start_new_boxed(self, info, source),
             _ => todo!(),
         };
         Ok(device)
     }
 }
 
-struct SinkDevice<S: ConvertibleSample, B: SoundSource> {
+struct Device<S: ConvertibleSample, B: SoundSource> {
     sender: Sender<GenericPacket>,
     info: DeviceInfo,
     source: B,
@@ -79,8 +85,8 @@ struct SinkDevice<S: ConvertibleSample, B: SoundSource> {
     take: usize,
 }
 
-impl<S: ConvertibleSample, B: SoundSource> SinkDevice<S, B> {
-    fn new(sink: &Sink, info: DeviceInfo, source: B) -> Self {
+impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
+    fn new(sink: &Collector, info: DeviceInfo, source: B) -> Self {
         Self {
             sender: sink.sender.clone(),
             info,
@@ -99,7 +105,11 @@ impl<S: ConvertibleSample, B: SoundSource> SinkDevice<S, B> {
         self.current = Some(handle);
     }
 
-    fn start_new_boxed(sink: &Sink, info: DeviceInfo, source: B) -> Box<dyn Device> {
+    fn start_new_boxed(
+        sink: &Collector,
+        info: DeviceInfo,
+        source: B,
+    ) -> Box<dyn crate::audio::Device> {
         let mut new = Self::new(sink, info, source);
         new.start();
         Box::new(new)
@@ -118,21 +128,23 @@ impl<S: ConvertibleSample, B: SoundSource> SinkDevice<S, B> {
         }
         let packet = SoundPacket::from_interleaved(samples, info.into());
         // send it to the handle
-        let _ = sender.send(GenericPacket::from(packet));
+        let _ = sender.send(GenericPacket::from(&packet));
     }
 }
 
-impl<S: ConvertibleSample, B: SoundSource> Device for SinkDevice<S, B> {
+impl<S: ConvertibleSample, B: SoundSource> crate::audio::Device for Device<S, B> {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
     fn pause(&mut self) -> AudioResult<()> {
-        unimplemented!("pausing or playing would end up doing nothing")
+        // pausing and playing don't do anything
+        Ok(())
     }
 
     fn resume(&mut self) -> AudioResult<()> {
-        unimplemented!("pausing or playing would end up doing nothing")
+        // pausing and playing don't do anything
+        Ok(())
     }
 
     fn restart(&mut self) -> AudioResult<()> {
@@ -150,7 +162,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for SinkDevice<S, B> {
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
-    ) -> AudioResult<Option<Box<dyn Device>>> {
+    ) -> AudioResult<Option<Box<dyn crate::audio::Device>>> {
         self.info = self.info.apply(&options);
         Ok(None)
     }
