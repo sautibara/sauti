@@ -33,7 +33,7 @@
 //!     fn build<S: ConvertibleSample>(
 //!         &self,
 //!         info: DeviceInfo,
-//!     ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+//!     ) -> impl Sound<S> {
 //!         // config from the source can be passed in
 //!         let frequency = self.frequency;
 //!         // and internal variables can be initialized outside the closure
@@ -41,7 +41,7 @@
 //!
 //!         // this closure is run for each sample to get the values
 //!         // it's given a mutable slice `channels` that holds each channel of the current sample
-//!         move |channels| {
+//!         move |channels: &mut [S]| {
 //!             clock = (clock + 1) % info.sample_rate;
 //!             let val =
 //!                 (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
@@ -172,13 +172,11 @@ impl DeviceExt for Box<dyn Device> {
     }
 }
 
-/// A source for sound played on a device
+/// A reusable source for a [`Sound`] played on a [`Device`]
 ///
 /// See [`Audio::start`] for how to use this
 pub trait SoundSource: 'static {
-    /// Creates a producer of samples for the sound
-    ///
-    /// The producer is run for each sample and given a mutable slice of channels for the current sample.
+    /// Creates the [`Sound`] which will be used to write each frame
     ///
     /// # Examples
     ///
@@ -189,7 +187,7 @@ pub trait SoundSource: 'static {
     /// fn build<S: ConvertibleSample>(
     ///     &self,
     ///     info: DeviceInfo,
-    /// ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+    /// ) -> impl Sound<S> {
     ///     // config from the source can be passed in (although no references are allowed)
     ///     let frequency = self.frequency;
     ///     // and internal variables can be initialized outside the closure
@@ -197,7 +195,7 @@ pub trait SoundSource: 'static {
     ///
     ///     // this closure is run for each sample to get the values
     ///     // it's given a mutable slice `channels` that holds each channel of the current sample
-    ///     move |channels| {
+    ///     move |channels: &mut [S]| {
     ///         clock = (clock + 1) % info.sample_rate;
     ///         let val =
     ///             (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
@@ -211,7 +209,51 @@ pub trait SoundSource: 'static {
     fn build<S: ConvertibleSample>(&self, context: DeviceInfo) -> impl Sound<S>; // thank you 1.75
 }
 
+/// A currently playing sound on a [`Device`], usually created using a [`SoundSource`]
+///
+/// For each frame of audio, [`Self::next_frame`] will be called to populate it
+///
+/// [`FnMut(&mut [S])`](FnMut) notably implements this trait
+///
+/// # Examples
+///
+/// ```
+/// use sauti::audio::prelude::*;
+///
+/// struct Sine {
+///     frequency: f64,
+///     clock: usize,
+///     sample_rate: usize,
+/// }
+///
+/// impl<S: ConvertibleSample> Sound<S> for Sine {
+///     fn next_frame(&mut self, channels: &mut [S]) {
+///         let val = self.clock as f64 * self.frequency * std::f64::consts::TAU / self.sample_rate as f64;
+///         let sin = val.sin();
+///         // S::from_sample must be used to convert the computed f64 value to the generic sample type
+///         // see [[SampleFormat]] for all of the accepted sample formats
+///         channels.fill(S::from_sample(sin));
+///         // increment the clock for the next value (state persists)
+///         self.clock = (self.clock + 1) % self.sample_rate;
+///     }
+/// }
+///
+/// let mut channels = vec![0.0; 1];
+/// let mut wave = Sine {
+///     frequency: 12000.0,
+///     clock: 0,
+///     sample_rate: 48000,
+/// };
+///
+/// wave.next_frame(&mut channels[..]);
+/// assert_eq!(channels, &[0.0]);
+/// wave.next_frame(&mut channels[..]);
+/// assert_eq!(channels, &[1.0]);
+/// ```
 pub trait Sound<S: ConvertibleSample>: Send + 'static {
+    /// Populate the next frame of audio
+    ///
+    /// `channels` holds each channel, in order
     fn next_frame(&mut self, channels: &mut [S]);
 }
 
