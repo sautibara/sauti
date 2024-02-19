@@ -1,7 +1,7 @@
 #![allow(clippy::needless_doctest_main)] // the SoundSource impl is too large
 //! Low-level audio handling
 //!
-//! To start playing audio, use an [`Audio`] to create a [`Device`] using a [`SoundSource`] and
+//! To start playing audio, use an [`Audio`] player to create a [`Device`] using a [`SoundSource`] and
 //! some [`DeviceOptions`]. The [`SoundSource`] is repeatedly called to get every frame of audio
 //! for the device. The device can then be [paused](Device::pause), which pauses the thread, or
 //! [resumed](Device::resume). Device options can also be changed on the fly using
@@ -95,6 +95,24 @@ pub trait Audio: Clone + Send + 'static {
         options: impl Into<DeviceOptions>,
         source: S,
     ) -> AudioResult<Box<dyn Device>>;
+    /// Create a new [`Device`] and start it paused using a [`SoundSource`]
+    ///
+    /// # Errors
+    ///
+    /// - If there are no output devices available
+    /// - If the default output device isn't available
+    /// - If the default output device doesn't support `options`
+    /// - If there is an error while [pausing](Device::pause)
+    /// - Other backend specific errors
+    fn start_paused<S: SoundSource>(
+        &self,
+        options: impl Into<DeviceOptions>,
+        source: S,
+    ) -> AudioResult<Box<dyn Device>> {
+        let mut device = self.start(options, source)?;
+        device.pause()?;
+        Ok(device)
+    }
 }
 
 /// A currently running stream on a sound device

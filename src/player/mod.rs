@@ -1,5 +1,7 @@
 pub mod prelude {
-    pub use super::{builder::Builder as PlayerBuilder, Player, PlayerError, PlayerResult};
+    pub use super::{
+        builder::Builder as PlayerBuilder, PlayState, Player, PlayerError, PlayerResult,
+    };
     pub use crate::audio::DeviceOptions;
     pub use crate::data::prelude::*;
     pub use crate::effect::prelude::*;
@@ -24,8 +26,8 @@ use self::decoder::PlayerDecoder;
 mod audio;
 pub mod builder;
 mod decoder;
-
-// TODO: break into multiple files
+mod shared;
+use shared::{AudioControl, Message};
 
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
@@ -69,13 +71,12 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
     /// - If there was an issue starting audio output
     pub fn run_blocking(self) -> PlayerResult<()> {
         let (packet_sender, packet_receiver) = crossbeam_channel::bounded(2);
-        let (audio_control, audio_control_reciever) = crossbeam_channel::bounded(2);
+        // audio control is a rendevous to make sure that the decoder and audio player is on the
+        // same page at all times
+        let (audio_control, audio_control_reciever) = crossbeam_channel::bounded(0);
 
-        // TODO: bring device and decode and such into state pls
         let source = PacketPlayer::new(&self, packet_receiver, audio_control_reciever);
-        let mut device = self.audio.start(self.options.clone(), source)?;
-        // device starts paused (stopped)
-        device.pause()?;
+        let device = self.audio.start_paused(self.options.clone(), source)?;
         let decoder = PlayerDecoder::new(&self, packet_sender);
 
         let mut state = State {
@@ -109,7 +110,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
 
         // NOTE: this blocks until the packet is sent
         // if it doesn't send (and thus returns false),
-        // then it blocks on the message reciever
+        // then it blocks on the message reciever instead
         if !(state.play_state.is_playing() && state.decoder.send_next_packet()?) {
             let Ok(message) = self.handle.recv() else {
                 // if all handles have hung up, then break
@@ -156,13 +157,16 @@ impl<'a, D: Decoder> State<'a, D> {
         match (stopped_before, stopped_after) {
             (true, false) => self.device.resume()?,
             (false, true) => {
-                self.seek_to(Duration::ZERO)?;
                 self.device.pause()?;
+                self.seek_to(Duration::ZERO)?;
             }
             // no need to update
             _ => (),
         }
         self.play_state = new;
+        self.audio_control
+            .send(AudioControl::SetState(new))
+            .map_err(|_| PlayerError::AudioDisconnected)?;
         Ok(())
     }
 
@@ -217,17 +221,6 @@ impl Default for PlayState {
     fn default() -> Self {
         Self::Stopped
     }
-}
-
-#[derive(Debug)]
-enum Message {
-    Play(MediaSource),
-    SetState(PlayState),
-}
-
-#[derive(Debug)]
-enum AudioControl {
-    Flush,
 }
 
 #[derive(Clone)]
