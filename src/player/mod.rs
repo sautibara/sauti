@@ -26,8 +26,6 @@ use self::decoder::PlayerDecoder;
 mod audio;
 pub mod builder;
 mod decoder;
-mod shared;
-use shared::{AudioControl, Message};
 
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
@@ -111,6 +109,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
         // NOTE: this blocks until the packet is sent
         // if it doesn't send (and thus returns false),
         // then it blocks on the message reciever instead
+        // TODO: stop after file finishes
         if !(state.play_state.is_playing() && state.decoder.send_next_packet()?) {
             let Ok(message) = self.handle.recv() else {
                 // if all handles have hung up, then break
@@ -221,6 +220,18 @@ impl Default for PlayState {
     fn default() -> Self {
         Self::Stopped
     }
+}
+
+#[derive(Debug)]
+pub enum Message {
+    Play(MediaSource),
+    SetState(PlayState),
+}
+
+#[derive(Debug)]
+pub enum AudioControl {
+    Flush,
+    SetState(PlayState),
 }
 
 #[derive(Clone)]
