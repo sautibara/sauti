@@ -1,6 +1,12 @@
 #![allow(clippy::needless_doctest_main)] // the SoundSource impl is too large
 //! Low-level audio handling
 //!
+//! To start playing audio, use an [`Audio`] to create a [`Device`] using a [`SoundSource`] and
+//! some [`DeviceOptions`]. The [`SoundSource`] is repeatedly called to get every frame of audio
+//! for the device. The device can then be [paused](Device::pause), which pauses the thread, or
+//! [resumed](Device::resume). Device options can also be changed on the fly using
+//! [`DeviceExt::merge_options`].
+//!
 //! # Examples
 //!
 //! ```
@@ -52,6 +58,7 @@ use thiserror::Error;
 
 mod cpal_impl;
 
+/// Useful types for interacting with audio
 pub mod prelude {
     pub use super::{
         Audio, AudioError, AudioResult, Device, DeviceExt, DeviceInfo, DeviceOptions, SoundSource,
@@ -366,8 +373,8 @@ impl DeviceOptions {
 
     /// Obtain an iterator over each potential option, including this one
     #[must_use]
-    pub const fn iter(&self) -> DeviceOptionIterator<'_> {
-        DeviceOptionIterator {
+    pub const fn iter(&self) -> DeviceOptionIter<'_> {
+        DeviceOptionIter {
             current: Some(self),
         }
     }
@@ -381,9 +388,9 @@ impl DeviceOptions {
 
 impl<'a> IntoIterator for &'a DeviceOptions {
     type Item = &'a DeviceOptions;
-    type IntoIter = DeviceOptionIterator<'a>;
+    type IntoIter = DeviceOptionIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        DeviceOptionIterator {
+        DeviceOptionIter {
             current: Some(self),
         }
     }
@@ -400,11 +407,12 @@ impl From<DeviceInfo> for DeviceOptions {
     }
 }
 
-pub struct DeviceOptionIterator<'a> {
+/// An iterator over the priority list of [`DeviceOptions`], including each's backups
+pub struct DeviceOptionIter<'a> {
     current: Option<&'a DeviceOptions>,
 }
 
-impl<'a> Iterator for DeviceOptionIterator<'a> {
+impl<'a> Iterator for DeviceOptionIter<'a> {
     type Item = &'a DeviceOptions;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -1,5 +1,12 @@
 //! Decoding of audio files
 //!
+//! To decode a file, use a [`Decoder`] to obtain an [`AudioStream`] with [`Decoder::read`].
+//! This stream then can be queried for packets using [`next_packet`](AudioStream::next_packet),
+//! or the entire stream can be decoded using [`decode_all`](AudioStreamExt::decode_all).
+//! The stream can also be [seeked](AudioStream::seek_to) or queried for its
+//! [position](AudioStream::position) or [duration](AudioStream::duration).
+//! To get the default decoder, use [`self::default`].
+//!
 //! # Examples
 //!
 //! ```
@@ -29,7 +36,7 @@ use crate::data::GenericPacket;
 
 mod symphonia;
 
-/// Useful things for interacting with a [`Decoder`]
+/// Useful types for interacting with a [`Decoder`]
 pub mod prelude {
     pub use super::{AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult};
     pub use crate::data::prelude::*;
@@ -97,7 +104,7 @@ pub trait AudioStream {
     ///
     /// The packets are guaranteed to be:
     /// - Fairly small (so that [effects](crate::effect) aren't too intensive)
-    /// - A consistent size ([for effects that need a consistent size](crate::effect::Resample))
+    /// - A consistent size ([for effects that need a consistent size](crate::effect::effects::Resample))
     ///
     /// # Errors
     ///
@@ -142,7 +149,7 @@ pub trait AudioStream {
     fn duration(&self) -> Duration;
 }
 
-/// Extra methods for [`AudioStream`] trait objects, ex: [`Box<dyn AudioStream>`]
+/// Methods specific for an [`AudioStream`] trait object ([`Box<dyn AudioStream>`])
 pub trait AudioStreamExt {
     /// Get an iterator over every packet
     ///

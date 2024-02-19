@@ -1,39 +1,78 @@
-use crate::data::{ConvertibleSample, GenericPacket, SoundPacket, StreamSpec};
-
-// TODO: resampler using rubato
+//! Audio effects that can be applied on a [`SoundPacket`]
+//!
+//! Effects are given each sound packet and the [`StreamSpec`] of the output stream and return a
+//! new, modified effect.
+//!
+//! # Examples
+//!
+//! ```
+//! use sauti::effect::prelude::*;
+//!
+//! let mono = SoundPacket::from_channels(&[&[1, 2]], 44100);
+//! let mut resizer = effect::ResizeChannels;
+//! // each effect takes in the [`StreamSpec`] of the output stream
+//! let stereo = resizer.apply_to(mono, &StreamSpec { channels: 2, sample_rate: 44100 });
+//!
+//! assert_eq!(stereo, SoundPacket::from_channels(&[&[1, 2], &[1, 2]], 44100));
+//! ```
 
 mod optional;
 mod resample;
 mod resize_channels;
 mod volume;
-pub use optional::Handle as OptionalHandle;
-pub use optional::Optional;
-pub use resample::Resample;
-pub use resize_channels::ResizeChannels;
-pub use volume::Volume;
 
+/// Various implemented effects
+pub mod effects {
+    pub use super::optional::Handle as OptionalHandle;
+    pub use super::optional::Optional;
+    pub use super::resample::Resample;
+    pub use super::resize_channels::ResizeChannels;
+    pub use super::volume::Volume;
+}
+
+/// Useful types for interacting with effects
+///
+/// Most effects are reexported under the module name [`effect`], ex: [`effect::Optional`]
 pub mod prelude {
     pub use super::{Effect, Generic as _};
     pub use crate::data::prelude::*;
-    pub use crate::effect;
+    pub use crate::effect::effects as effect;
 }
 
+use prelude::*;
+
+/// Get the default effects that should be used on a stream
+///
+/// These make sure that the packet [`StreamSpec`] matches the `output_spec`
 #[must_use]
 pub fn default() -> self::Default {
-    ResizeChannels.then(Resample::default())
+    effect::ResizeChannels.then(effect::Resample::default())
 }
 
-pub type Default = List<ResizeChannels, Resample>;
+/// The concrete type of the default effects returned by [`default`]
+///
+/// Note: the actual type may change in the future, although it is guaranteed to implement [`Effect`]
+pub type Default = List<effect::ResizeChannels, effect::Resample>;
 
+/// An audio effect that modifies an input [`SoundPacket`]
 pub trait Effect: Clone + Send + 'static {
+    /// Apply the effect onto the `input` packet
+    ///
+    /// `_output_spec` holds the [`StreamSpec`] of the audio output
     fn apply_to<S: ConvertibleSample>(
         &mut self,
         input: SoundPacket<S>,
-        output_spec: &StreamSpec,
+        _output_spec: &StreamSpec,
     ) -> SoundPacket<S>;
 
+    /// Reset the effect, if needed
+    ///
+    /// This is guaranteed to be automatically called after `_output_spec` is changed.
+    ///
+    /// The default implementation does nothing
     fn reset(&mut self) {}
 
+    /// Create an effect that applies `self` first and then `next` after
     fn then<N: Effect>(self, next: N) -> List<Self, N>
     where
         Self: Sized,
@@ -44,14 +83,18 @@ pub trait Effect: Clone + Send + 'static {
         }
     }
 
-    fn activate_with(self, handle: OptionalHandle) -> Optional<Self>
+    /// Tie `self` to an [`OptionalHandle`](effect::OptionalHandle)
+    fn activate_with(self, handle: effect::OptionalHandle) -> effect::Optional<Self>
     where
         Self: Sized,
     {
-        Optional::with_handle(self, handle)
+        effect::Optional::with_handle(self, handle)
     }
 }
 
+/// A list of effects applied in order
+///
+/// Use [`Effect::then`] to create
 #[derive(Clone)]
 pub struct List<E: Effect, N: Effect> {
     current: E,
@@ -75,6 +118,7 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
     }
 }
 
+/// An effect that does nothing
 #[derive(Clone)]
 pub struct None;
 
