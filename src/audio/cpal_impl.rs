@@ -210,13 +210,13 @@ impl Cpal {
             .map_err(|err| build_stream_error(err, device))
     }
 
-    fn data_callback<S: SizedSample>(
+    fn data_callback<S: ConvertibleSample>(
         data: &mut [S],
-        handler: &mut (impl FnMut(&mut [S]) + Send + 'static),
+        handler: &mut impl Sound<S>,
         channels: u16,
     ) {
         for sample in data.chunks_mut(channels as usize) {
-            handler(sample);
+            handler.next_frame(sample);
         }
     }
 }

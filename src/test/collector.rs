@@ -116,7 +116,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
     }
 
     fn start_blocking(
-        mut source: impl FnMut(&mut [S]) + Send + 'static,
+        mut source: impl Sound<S>,
         sender: &Sender<GenericPacket>,
         info: DeviceInfo,
         take: usize,
@@ -124,7 +124,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
         // form the samples into a packet
         let mut samples = vec![S::EQUILIBRIUM; info.channels * take];
         for channels in samples.chunks_exact_mut(info.channels) {
-            source(channels);
+            source.next_frame(channels);
         }
         let packet = SoundPacket::from_interleaved(samples, info.into());
         // send it to the handle

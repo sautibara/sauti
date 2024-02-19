@@ -61,7 +61,8 @@ mod cpal_impl;
 /// Useful types for interacting with audio
 pub mod prelude {
     pub use super::{
-        Audio, AudioError, AudioResult, Device, DeviceExt, DeviceInfo, DeviceOptions, SoundSource,
+        Audio, AudioError, AudioResult, Device, DeviceExt, DeviceInfo, DeviceOptions, Sound,
+        SoundSource,
     };
     pub use crate::data::*;
 }
@@ -207,18 +208,31 @@ pub trait SoundSource: 'static {
     /// }
     /// # }
     /// ```
-    fn build<S: ConvertibleSample>(
-        &self,
-        context: DeviceInfo,
-    ) -> impl FnMut(&mut [S]) + Send + 'static; // thank you 1.75
+    fn build<S: ConvertibleSample>(&self, context: DeviceInfo) -> impl Sound<S>; // thank you 1.75
+}
+
+pub trait Sound<S: ConvertibleSample>: Send + 'static {
+    fn next_frame(&mut self, channels: &mut [S]);
+}
+
+impl<S: ConvertibleSample, T: FnMut(&mut [S]) + Send + 'static> Sound<S> for T {
+    fn next_frame(&mut self, channels: &mut [S]) {
+        self(channels);
+    }
+}
+
+impl<S: ConvertibleSample> Sound<S> for Silence {
+    fn next_frame(&mut self, channels: &mut [S]) {
+        channels.fill(S::EQUILIBRIUM);
+    }
 }
 
 /// Source that only outputs silence
 pub struct Silence;
 
 impl SoundSource for Silence {
-    fn build<S: ConvertibleSample>(&self, _: DeviceInfo) -> impl FnMut(&mut [S]) + Send + 'static {
-        |channels| channels.fill(S::EQUILIBRIUM)
+    fn build<S: ConvertibleSample>(&self, _: DeviceInfo) -> impl Sound<S> {
+        |channels: &mut [S]| channels.fill(S::EQUILIBRIUM)
     }
 }
 
