@@ -52,11 +52,13 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
 
     fn next_packet(&mut self) -> Option<GenericPacket> {
         let stream = self.current_stream.as_mut()?;
-        let res = stream.next_packet();
-        if let Err(err) = &res {
-            error!("error found while decoding: {err:?}");
+        let packet = (stream.next_packet())
+            .map_err(|err| error!("error found while decoding: {err:?}"))
+            .ok()?;
+        if packet.is_none() {
+            self.current_stream = None;
         }
-        res.ok()?
+        packet
     }
 
     pub fn decode(&mut self, source: &MediaSource) {
