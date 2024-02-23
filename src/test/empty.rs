@@ -6,10 +6,27 @@ use crate::decoder::prelude::*;
 use crate::effect::Effect;
 use crate::player::Player;
 
+/// Provides implementations for [`Decoder`], [`Audio`], and [`Effect`] that all do nothing
 #[derive(Clone, Copy)]
 pub struct Empty;
 
 impl Empty {
+    /// Create a [`PlayerBuilder`](crate::player::builder::Builder) that uses all [`Empty`]
+    /// implementations
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), sauti::player::Disconnected> {
+    /// use sauti::test::prelude::*;
+    ///
+    /// let handle = Empty::player().run();
+    /// // none of these actually result in audio being played
+    /// handle.play("")?;
+    /// handle.pause()?;
+    /// handle.resume()?;
+    /// # Ok(()) }
+    /// ```
     #[must_use]
     pub fn player() -> crate::player::builder::Builder<Self, Self, Self> {
         Player::default_builder()
