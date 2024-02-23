@@ -4,6 +4,10 @@ use dasp_sample::Sample;
 
 use super::prelude::*;
 
+/// Resize the given channels to fit the output [`StreamSpec`]
+///
+/// If the packet doesn't need to be reisized, then it does nothing. If it does, then it fills
+/// every output channel with the average of the input channels.
 #[derive(Clone)]
 pub struct ResizeChannels;
 

@@ -5,6 +5,10 @@ use super::prelude::*;
 use crossbeam::atomic::AtomicCell;
 use dasp_sample::Sample;
 
+/// Applies a changeable volume using an atomic [`Handle`]
+///
+/// [`Player`](crate::player::Player) already has its own implementation of volume, but this could
+/// also be used if necessary.
 #[derive(Clone)]
 pub struct Volume(pub Handle);
 
@@ -31,6 +35,7 @@ impl Effect for Volume {
     }
 }
 
+/// A [`Volume`] handle, able to get or set the current volume
 #[derive(Clone)]
 pub struct Handle(Arc<AtomicCell<f64>>);
 
@@ -48,6 +53,7 @@ impl Handle {
     }
 }
 
+/// Applies a constant volume to incoming [`SoundPacket`]s
 #[derive(Clone)]
 pub struct Constant(pub f64);
 

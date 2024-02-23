@@ -5,6 +5,7 @@ use std::sync::{
 
 use super::prelude::*;
 
+/// Applies the inner [`Effect`] optionally, based on the atomic [`Handle`]
 #[derive(Clone)]
 pub struct Optional<E: Effect> {
     pub current: E,
@@ -31,6 +32,7 @@ impl<E: Effect> Optional<E> {
     }
 }
 
+/// A handle for [`Optional`], able to activate or deactivate the inner [`Effect`]
 #[derive(Clone)]
 pub struct Handle(Arc<AtomicBool>);
 

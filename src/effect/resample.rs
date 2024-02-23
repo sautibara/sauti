@@ -6,9 +6,18 @@ use rubato::{
 
 use super::prelude::*;
 
+/// Resample the input [`SoundPacket`] to fit with the output [`StreamSpec`]
+///
+/// The current implementation uses [`rubato`]. This means that whenever the input or output
+/// [`StreamSpec`] change, or the amount of frames in the input [`SoundPacket`] changes, the
+/// resampler has to be remade, which is often fairly intensive. As such, it relies on the
+/// [`Decoder`](crate::decoder::Decoder) to provide consistently-sized packets.
+///
 /// # Panics
 ///
 /// - If the input amount of channels is different than the output
+///     - [`ResizeChannels`](super::effect::ResizeChannels) or some equivalent should probably be
+///     used before this
 #[derive(Default)]
 pub struct Resample {
     resampler: Option<Inner>,
