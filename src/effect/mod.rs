@@ -27,6 +27,7 @@ pub mod effects {
     pub use super::optional::Optional;
     pub use super::resample::Resample;
     pub use super::resize_channels::ResizeChannels;
+    pub use super::volume::Constant as ConstantVolume;
     pub use super::volume::Volume;
 }
 
@@ -115,6 +116,18 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
     fn reset(&mut self) {
         self.current.reset();
         self.next.reset();
+    }
+}
+
+impl<E: Effect, N: Effect> List<E, N> {
+    /// Mutate the current effect
+    pub fn current(&mut self) -> &mut E {
+        &mut self.current
+    }
+
+    /// Mutate the next effect
+    pub fn after(&mut self) -> &mut N {
+        &mut self.next
     }
 }
 

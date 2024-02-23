@@ -1,3 +1,6 @@
+//! A single-track audio player
+
+/// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
         builder::Builder as PlayerBuilder, PlayState, Player, PlayerError, PlayerResult,
@@ -30,25 +33,29 @@ pub mod builder;
 mod decoder;
 
 #[derive(Debug)]
-pub enum Message {
+enum Message {
     Play(MediaSource),
     SetState(PlayState),
+    SetVolume(f64),
 }
 
 #[derive(Debug)]
-pub enum AudioControl {
+enum AudioControl {
     Flush,
     SetState(PlayState),
+    SetVolume(f64),
 }
 
 struct Shared {
     play_state: AtomicCell<PlayState>,
+    volume: AtomicCell<f64>,
 }
 
-impl Default for Shared {
-    fn default() -> Self {
+impl Shared {
+    fn new(volume: f64) -> Self {
         Self {
-            play_state: AtomicCell::new(PlayState::Stopped),
+            play_state: AtomicCell::default(),
+            volume: AtomicCell::new(volume),
         }
     }
 }
@@ -64,10 +71,23 @@ pub struct Player<D: Decoder, E: Effect, A: Audio> {
     shared: Arc<Shared>,
 }
 
+impl Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default> {
+    #[must_use]
+    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
+        Builder::default()
+    }
+}
+
 impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
-    fn new(decoder: D, effects: E, audio: A, options: DeviceOptions) -> (Self, Handle) {
+    fn new(
+        decoder: D,
+        effects: E,
+        audio: A,
+        options: DeviceOptions,
+        volume: f64,
+    ) -> (Self, Handle) {
         let (sender, receiver) = crossbeam_channel::unbounded();
-        let shared: Arc<Shared> = Arc::default();
+        let shared: Arc<Shared> = Arc::new(Shared::new(volume));
         let weak = Arc::downgrade(&shared);
         (
             Self {
@@ -106,7 +126,12 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
         // same page at all times
         let (audio_control, audio_control_reciever) = crossbeam_channel::bounded(0);
 
-        let source = PacketPlayer::new(&self, packet_receiver, audio_control_reciever);
+        let source = PacketPlayer::new(
+            &self,
+            packet_receiver,
+            audio_control_reciever,
+            self.shared.volume.load(),
+        );
         let device = self.audio.start_paused(self.options.clone(), source)?;
         let decoder = PlayerDecoder::new(&self, packet_sender);
 
@@ -120,13 +145,6 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
         };
 
         inner.run_blocking()
-    }
-}
-
-impl Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default> {
-    #[must_use]
-    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
-        Builder::default()
     }
 }
 
@@ -183,6 +201,10 @@ impl<'a, D: Decoder> Inner<'a, D> {
                 self.decoder.decode(&source);
             }
             Message::SetState(new) => self.update_play_state(new)?,
+            Message::SetVolume(new) => {
+                self.send_control(AudioControl::SetVolume(new))?;
+                self.shared.volume.store(new);
+            }
         }
         Ok(())
     }
@@ -229,6 +251,10 @@ impl<'a, D: Decoder> Inner<'a, D> {
 
 /// A handle to a [`Player`] that could control it or query its info
 ///
+/// # Errors
+///
+/// If the player disconnects, then all methods will return [`Err(Disconnected)`](Disconnected)
+///
 /// # Examples
 ///
 /// ```
@@ -238,7 +264,7 @@ impl<'a, D: Decoder> Inner<'a, D> {
 /// use std::thread::sleep;
 /// # fn main() -> Result<(), sauti::player::Disconnected> {
 ///
-/// // create a new empty player (it ignores audio)
+/// // create a new player that ignores audio
 /// let handle = Empty::player().run();
 ///
 /// // start playing an imaginary file
@@ -269,54 +295,41 @@ pub struct Handle {
 #[error("player was disconnected")]
 pub struct Disconnected;
 
+// error documentation done above
+#[allow(clippy::missing_errors_doc)]
 impl Handle {
     fn send(&self, message: Message) -> Result<(), Disconnected> {
         self.handle.send(message).map_err(|_| Disconnected)
     }
 
     /// Make the player start playing `source`
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn play(&self, source: impl Into<MediaSource>) -> Result<(), Disconnected> {
         self.send(Message::Play(source.into()))
     }
 
     /// Change the [`Player`]'s [`PlayState`] to `play_state`
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn set_state(&self, play_state: PlayState) -> Result<(), Disconnected> {
         self.send(Message::SetState(play_state))
     }
 
     /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn pause(&self) -> Result<(), Disconnected> {
         self.set_state(PlayState::Paused)
     }
 
     /// Change the [`Player`]'s [`PlayState`] to [`Playing`](PlayState::Playing)
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn resume(&self) -> Result<(), Disconnected> {
         self.set_state(PlayState::Playing)
     }
 
     /// Change the [`Player`]'s [`PlayState`] to [`Stopped`](PlayState::Stopped)
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn stop(&self) -> Result<(), Disconnected> {
         self.set_state(PlayState::Stopped)
+    }
+
+    /// Change the [`Player`]'s volume to `volume`
+    pub fn set_volume(&self, volume: f64) -> Result<(), Disconnected> {
+        self.send(Message::SetVolume(volume))
     }
 
     /// Get a value from the [`Shared`] reference,
@@ -328,12 +341,13 @@ impl Handle {
     }
 
     /// Get the current play state of the [`Player`]
-    ///
-    /// # Errors
-    ///
-    /// - If the player is disconnected
     pub fn play_state(&self) -> Result<PlayState, Disconnected> {
         self.get(|shared| shared.play_state.load())
+    }
+
+    /// Get the current volume of the [`Player`]
+    pub fn volume(&self) -> Result<f64, Disconnected> {
+        self.get(|shared| shared.volume.load())
     }
 
     /// Returns `true` if the [`Player`] has disconnected
@@ -409,3 +423,18 @@ impl From<AudioError> for PlayerError {
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type PlayerResult<T> = Result<T, PlayerError>;
+
+#[cfg(test)]
+mod test {
+    use crossbeam::atomic::AtomicCell;
+
+    #[test]
+    pub fn play_state_is_lock_free() {
+        assert!(AtomicCell::<super::PlayState>::is_lock_free());
+    }
+
+    #[test]
+    pub fn volume_is_lock_free() {
+        assert!(AtomicCell::<f64>::is_lock_free());
+    }
+}

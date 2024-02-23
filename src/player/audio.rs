@@ -1,8 +1,8 @@
 use crossbeam_channel::{select, Receiver};
 
-use crate::audio::prelude::*;
 use crate::decoder::Decoder;
 use crate::effect::prelude::*;
+use crate::{audio::prelude::*, effect::List};
 
 use super::{AudioControl, Player};
 
@@ -10,7 +10,7 @@ use super::{AudioControl, Player};
 pub struct PacketPlayer<E: Effect> {
     packets: Receiver<GenericPacket>,
     audio_control: Receiver<AudioControl>,
-    effects: E,
+    effects: List<E, effect::ConstantVolume>,
 }
 
 impl<E: Effect> PacketPlayer<E> {
@@ -18,11 +18,12 @@ impl<E: Effect> PacketPlayer<E> {
         player: &Player<D, E, A>,
         packets: Receiver<GenericPacket>,
         audio_control: Receiver<AudioControl>,
+        volume: f64,
     ) -> Self {
         Self {
             packets,
             audio_control,
-            effects: player.effects.clone(),
+            effects: (player.effects.clone()).then(effect::ConstantVolume(volume)),
         }
     }
 
@@ -95,7 +96,8 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
             },
             recv(self.receiver.packets) -> packet => {
                 let packet = packet.expect("the packet sender should never hang up before exiting");
-                let effected = self.receiver.effects.apply_to_generic(packet, &self.spec);
+                let effected = self.receiver.effects
+                    .apply_to_generic(packet, &self.spec);
                 Ok(effected.convert())
             },
         }
@@ -119,6 +121,8 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
         match message {
             AudioControl::Flush => self.flush(),
             AudioControl::SetState(val) => self.playing = val.is_playing(),
+            // the volume setter is at the end of the list
+            AudioControl::SetVolume(val) => self.receiver.effects.after().0 = *val,
         }
     }
 

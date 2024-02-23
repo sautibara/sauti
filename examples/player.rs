@@ -1,33 +1,34 @@
-use sauti::player::prelude::*;
+use sauti::player::{prelude::*, Disconnected};
 
-pub fn main() {
+pub fn main() -> Result<(), Disconnected> {
     env_logger::init();
 
-    let volume_handle = effect::Volume::create_handle(0.5);
-    let handle = Player::default_builder()
-        .add_effect(effect::Volume(volume_handle))
-        .run();
+    let handle = Player::default_builder().volume(0.5).run();
 
     let Some(path) = std::env::args().nth(1) else {
         println!("usage: {{command}} {{path}}");
-        return;
+        return Ok(());
     };
 
-    handle.play(path).unwrap();
+    handle.play(path)?;
 
     std::io::stdin()
         .read_line(&mut String::new())
         .expect("failed to read stdin");
 
-    handle.pause().unwrap();
+    // handle.pause()?;
+    handle.set_volume(0.1)?;
 
     std::io::stdin()
         .read_line(&mut String::new())
         .expect("failed to read stdin");
 
-    handle.resume().unwrap();
+    // handle.resume()?;
+    handle.set_volume(0.5)?;
 
     std::io::stdin()
         .read_line(&mut String::new())
         .expect("failed to read stdin");
+
+    Ok(())
 }

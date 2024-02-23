@@ -122,6 +122,12 @@ pub struct StreamSpec {
     pub sample_rate: usize,
 }
 
+impl Default for StreamSpec {
+    fn default() -> Self {
+        DeviceInfo::default().into()
+    }
+}
+
 impl From<DeviceInfo> for StreamSpec {
     fn from(value: DeviceInfo) -> Self {
         Self {

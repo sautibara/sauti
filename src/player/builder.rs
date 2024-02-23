@@ -54,57 +54,10 @@ pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> {
     effects: E,
     audio: A,
     options: DeviceOptions,
+    volume: f64,
 }
 
 impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
-    #[must_use]
-    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A> {
-        Builder {
-            decoder,
-            effects: self.effects,
-            audio: self.audio,
-            options: self.options,
-        }
-    }
-
-    #[must_use]
-    pub fn effects<N: Effect>(self, effects: N) -> Builder<D, N, A> {
-        Builder {
-            decoder: self.decoder,
-            effects,
-            audio: self.audio,
-            options: self.options,
-        }
-    }
-
-    #[must_use]
-    pub fn add_effect<N: Effect>(self, effect: N) -> Builder<D, EffectListSupplier<E, N>, A> {
-        Builder {
-            decoder: self.decoder,
-            effects: EffectListSupplier {
-                first: self.effects,
-                next: effect,
-            },
-            audio: self.audio,
-            options: self.options,
-        }
-    }
-
-    #[must_use]
-    pub fn audio<N: Audio>(self, audio: N) -> Builder<D, E, N> {
-        Builder {
-            effects: self.effects,
-            decoder: self.decoder,
-            audio,
-            options: self.options,
-        }
-    }
-
-    #[must_use]
-    pub fn options(self, options: DeviceOptions) -> Self {
-        Self { options, ..self }
-    }
-
     pub fn run(self) -> Handle {
         let (player, handle) = self.build();
         player.run();
@@ -118,7 +71,65 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
             self.effects.give(),
             self.audio.give(),
             self.options,
+            self.volume,
         )
+    }
+
+    #[must_use]
+    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A> {
+        Builder {
+            decoder,
+            effects: self.effects,
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+        }
+    }
+
+    #[must_use]
+    pub fn effects<N: Effect>(self, effects: N) -> Builder<D, N, A> {
+        Builder {
+            decoder: self.decoder,
+            effects,
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+        }
+    }
+
+    #[must_use]
+    pub fn add_effect<N: Effect>(self, effect: N) -> Builder<D, EffectListSupplier<E, N>, A> {
+        Builder {
+            decoder: self.decoder,
+            effects: EffectListSupplier {
+                first: self.effects,
+                next: effect,
+            },
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+        }
+    }
+
+    #[must_use]
+    pub fn audio<N: Audio>(self, audio: N) -> Builder<D, E, N> {
+        Builder {
+            effects: self.effects,
+            decoder: self.decoder,
+            audio,
+            options: self.options,
+            volume: self.volume,
+        }
+    }
+
+    #[must_use]
+    pub fn options(self, options: DeviceOptions) -> Self {
+        Self { options, ..self }
+    }
+
+    #[must_use]
+    pub fn volume(self, volume: f64) -> Self {
+        Self { volume, ..self }
     }
 }
 
@@ -129,6 +140,7 @@ impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
             effects: DefaultEffect,
             audio: DefaultAudio,
             options: DeviceOptions::default(),
+            volume: 1.0,
         }
     }
 }
