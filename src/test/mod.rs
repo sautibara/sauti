@@ -29,13 +29,16 @@
 //! assert_eq!(given_packet, generic);
 //! ```
 mod collector;
+mod empty;
 mod provider;
 
 pub use collector::Collector;
 pub use collector::Handle as CollectorHandle;
+pub use empty::Empty;
 pub use provider::Provider;
 
 pub mod prelude {
     pub use super::Collector;
+    pub use super::Empty;
     pub use super::Provider;
 }

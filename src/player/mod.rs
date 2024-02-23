@@ -229,34 +229,34 @@ impl<'a, D: Decoder> Inner<'a, D> {
 
 /// A handle to a [`Player`] that could control it or query its info
 ///
-// /// # Examples
-// ///
-// /// ```
-// /// use sauti::player::prelude::*;
-// /// use sauti::test::prelude::*;
-// /// use std::time::Duration;
-// /// use std::thread::sleep;
-// /// # fn main() -> Result<(), sauti::player::Disconnected> {
-// ///
-// /// // create a new empty player (it ignores audio)
-// /// let handle = Empty::player().run();
-// ///
-// /// // start playing an imaginary file
-// /// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
-// /// handle.play("")?;
-// /// // it may take a bit for the player to recieve the message
-// /// sleep(Duration::from_millis(100));
-// /// // once the player starts playing, it changes to [`PlayState::Playing`]
-// /// assert_eq!(handle.play_state()?, PlayState::Playing);
-// ///
-// /// // the handle can also pause
-// /// handle.pause()?;
-// /// sleep(Duration::from_millis(100));
-// /// assert_eq!(handle.play_state()?, PlayState::Paused);
-// ///
-// /// # Ok(())
-// /// # }
-// /// ```
+/// # Examples
+///
+/// ```
+/// use sauti::player::prelude::*;
+/// use sauti::test::prelude::*;
+/// use std::time::Duration;
+/// use std::thread::sleep;
+/// # fn main() -> Result<(), sauti::player::Disconnected> {
+///
+/// // create a new empty player (it ignores audio)
+/// let handle = Empty::player().run();
+///
+/// // start playing an imaginary file
+/// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
+/// handle.play("")?;
+/// // it may take a bit for the player to recieve the message
+/// sleep(Duration::from_millis(100));
+/// // once the player starts playing, it changes to [`PlayState::Playing`]
+/// assert_eq!(handle.play_state()?, PlayState::Playing);
+///
+/// // the handle can also pause
+/// handle.pause()?;
+/// sleep(Duration::from_millis(100));
+/// assert_eq!(handle.play_state()?, PlayState::Paused);
+///
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Handle {
     handle: Sender<Message>,
