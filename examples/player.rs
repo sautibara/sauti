@@ -19,7 +19,7 @@ pub fn main() {
         .read_line(&mut String::new())
         .expect("failed to read stdin");
 
-    handle.stop().unwrap();
+    handle.pause().unwrap();
 
     std::io::stdin()
         .read_line(&mut String::new())

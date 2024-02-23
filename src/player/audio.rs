@@ -89,14 +89,14 @@ impl<E: Effect, S: ConvertibleSample> Sound<S> for PacketSound<E, S> {
 impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
     fn next_packet(&mut self) -> Result<SoundPacket<S>, AudioControl> {
         select! {
+            recv(self.receiver.audio_control) -> control => {
+                let control = control.expect("the audio control sender should never hang up before exiting");
+                Err(control)
+            },
             recv(self.receiver.packets) -> packet => {
                 let packet = packet.expect("the packet sender should never hang up before exiting");
                 let effected = self.receiver.effects.apply_to_generic(packet, &self.spec);
                 Ok(effected.convert())
-            },
-            recv(self.receiver.audio_control) -> control => {
-                let control = control.expect("the audio control sender should never hang up before exiting");
-                Err(control)
             },
         }
     }

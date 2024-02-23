@@ -27,6 +27,18 @@ mod audio;
 pub mod builder;
 mod decoder;
 
+#[derive(Debug)]
+pub enum Message {
+    Play(MediaSource),
+    SetState(PlayState),
+}
+
+#[derive(Debug)]
+pub enum AudioControl {
+    Flush,
+    SetState(PlayState),
+}
+
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
 pub struct Player<D: Decoder, E: Effect, A: Audio> {
@@ -38,7 +50,7 @@ pub struct Player<D: Decoder, E: Effect, A: Audio> {
 }
 
 impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
-    pub fn new(decoder: D, effects: E, audio: A, options: DeviceOptions) -> (Self, Handle) {
+    fn new(decoder: D, effects: E, audio: A, options: DeviceOptions) -> (Self, Handle) {
         let (sender, receiver) = crossbeam_channel::unbounded();
         (
             Self {
@@ -68,7 +80,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
     ///
     /// - If there was an issue starting audio output
     pub fn run_blocking(self) -> PlayerResult<()> {
-        let (packet_sender, packet_receiver) = crossbeam_channel::bounded(2);
+        let (packet_sender, packet_receiver) = crossbeam_channel::bounded(8);
         // audio control is a rendevous to make sure that the decoder and audio player is on the
         // same page at all times
         let (audio_control, audio_control_reciever) = crossbeam_channel::bounded(0);
@@ -77,48 +89,15 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
         let device = self.audio.start_paused(self.options.clone(), source)?;
         let decoder = PlayerDecoder::new(&self, packet_sender);
 
-        let mut state = State {
+        let mut inner = Inner {
             play_state: PlayState::Stopped,
             device,
             decoder,
             audio_control,
+            handle: &self.handle,
         };
 
-        loop {
-            let res = self.tick(&mut state);
-            match res {
-                Ok(ControlFlow::Continue(())) => (),
-                Ok(ControlFlow::Break(())) => break,
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn tick(&self, state: &mut State<D>) -> PlayerResult<ControlFlow<()>> {
-        match self.handle.try_recv() {
-            Ok(message) => state.handle(message)?,
-            Err(TryRecvError::Empty) => (),
-            // if all handles have hung up, then break
-            Err(TryRecvError::Disconnected) => return Ok(ControlFlow::Break(())),
-        }
-
-        // NOTE: this blocks until the packet is sent
-        // if it doesn't send (and thus returns false),
-        // then it blocks on the message reciever instead
-        // TODO: stop after file finishes
-        if !(state.play_state.is_playing() && state.decoder.send_next_packet()?) {
-            let Ok(message) = self.handle.recv() else {
-                // if all handles have hung up, then break
-                return Ok(ControlFlow::Break(()));
-            };
-            state.handle(message)?;
-        }
-
-        Ok(ControlFlow::Continue(()))
+        inner.run_blocking()
     }
 }
 
@@ -129,15 +108,47 @@ impl Player<crate::decoder::Default, crate::effect::Default, crate::audio::Defau
     }
 }
 
+macro_rules! recv_or_break {
+    ($expr:expr => |$message:ident| $map:expr) => {
+        match $expr.map_err(TryRecvError::from) {
+            Ok($message) => $map?,
+            Err(TryRecvError::Empty) => (),
+            Err(TryRecvError::Disconnected) => return Ok(ControlFlow::Break(())),
+        }
+    };
+}
+
 #[allow(clippy::struct_field_names)] // "play state" is its own thing
-struct State<'a, D: Decoder> {
+struct Inner<'a, D: Decoder> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
     audio_control: Sender<AudioControl>,
+    handle: &'a Receiver<Message>,
 }
 
-impl<'a, D: Decoder> State<'a, D> {
+impl<'a, D: Decoder> Inner<'a, D> {
+    fn run_blocking(&mut self) -> PlayerResult<()> {
+        while self.tick()?.is_continue() {}
+
+        Ok(())
+    }
+
+    fn tick(&mut self) -> PlayerResult<ControlFlow<()>> {
+        // if there's a message waiting, then handle it
+        recv_or_break!(self.handle.try_recv() => |message| self.handle(message));
+
+        // NOTE: this blocks until the packet is sent
+        // if it doesn't send (and thus returns false),
+        // then it blocks on the message reciever instead
+        // TODO: stop after file finishes
+        if !(self.play_state.is_playing() && self.decoder.send_next_packet()?) {
+            recv_or_break!(self.handle.recv() => |message| self.handle(message));
+        }
+
+        Ok(ControlFlow::Continue(()))
+    }
+
     fn handle(&mut self, message: Message) -> PlayerResult<()> {
         match message {
             Message::Play(source) => {
@@ -151,87 +162,39 @@ impl<'a, D: Decoder> State<'a, D> {
     }
 
     fn update_play_state(&mut self, new: PlayState) -> PlayerResult<()> {
-        let stopped_before = self.play_state.is_stopped();
-        let stopped_after = new.is_stopped();
-        match (stopped_before, stopped_after) {
-            (true, false) => self.device.resume()?,
-            (false, true) => {
+        if self.play_state == new {
+            return Ok(());
+        }
+
+        let playing_before = !self.play_state.is_stopped();
+        let playing_after = !new.is_stopped();
+        match (playing_before, playing_after) {
+            (false, true) => self.device.resume()?,
+            (true, false) => {
                 self.device.pause()?;
                 self.seek_to(Duration::ZERO)?;
             }
             // no need to update
             _ => (),
         }
+
         self.play_state = new;
-        self.audio_control
-            .send(AudioControl::SetState(new))
-            .map_err(|_| PlayerError::AudioDisconnected)?;
+        self.send_control(AudioControl::SetState(new))?;
         Ok(())
     }
 
     fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_to(duration))?;
-        self.flush_packets()?;
+        self.send_control(AudioControl::Flush)?;
         Ok(())
     }
 
-    fn flush_packets(&mut self) -> PlayerResult<()> {
+    fn send_control(&self, message: AudioControl) -> PlayerResult<()> {
         self.audio_control
-            .send(AudioControl::Flush)
+            .send(message)
             .map_err(|_| PlayerError::AudioDisconnected)
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum PlayState {
-    Playing,
-    Paused,
-    Stopped,
-}
-
-impl PlayState {
-    /// Returns `true` if the play state is [`Playing`].
-    ///
-    /// [`Playing`]: PlayState::Playing
-    #[must_use]
-    pub const fn is_playing(self) -> bool {
-        matches!(self, Self::Playing)
-    }
-
-    /// Returns `true` if the play state is [`Paused`].
-    ///
-    /// [`Paused`]: PlayState::Paused
-    #[must_use]
-    pub const fn is_paused(self) -> bool {
-        matches!(self, Self::Paused)
-    }
-
-    /// Returns `true` if the play state is [`Stopped`].
-    ///
-    /// [`Stopped`]: PlayState::Stopped
-    #[must_use]
-    pub const fn is_stopped(self) -> bool {
-        matches!(self, Self::Stopped)
-    }
-}
-
-impl Default for PlayState {
-    fn default() -> Self {
-        Self::Stopped
-    }
-}
-
-#[derive(Debug)]
-pub enum Message {
-    Play(MediaSource),
-    SetState(PlayState),
-}
-
-#[derive(Debug)]
-pub enum AudioControl {
-    Flush,
-    SetState(PlayState),
 }
 
 #[derive(Clone)]
@@ -277,6 +240,45 @@ impl Handle {
     /// - If the player is disconnected
     pub fn stop(&self) -> Result<(), Disconnected> {
         send!(self, Message::SetState(PlayState::Stopped))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PlayState {
+    Playing,
+    Paused,
+    Stopped,
+}
+
+impl PlayState {
+    /// Returns `true` if the play state is [`Playing`].
+    ///
+    /// [`Playing`]: PlayState::Playing
+    #[must_use]
+    pub const fn is_playing(self) -> bool {
+        matches!(self, Self::Playing)
+    }
+
+    /// Returns `true` if the play state is [`Paused`].
+    ///
+    /// [`Paused`]: PlayState::Paused
+    #[must_use]
+    pub const fn is_paused(self) -> bool {
+        matches!(self, Self::Paused)
+    }
+
+    /// Returns `true` if the play state is [`Stopped`].
+    ///
+    /// [`Stopped`]: PlayState::Stopped
+    #[must_use]
+    pub const fn is_stopped(self) -> bool {
+        matches!(self, Self::Stopped)
+    }
+}
+
+impl Default for PlayState {
+    fn default() -> Self {
+        Self::Stopped
     }
 }
 
