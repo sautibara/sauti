@@ -336,6 +336,16 @@ impl DeviceInfo {
     }
 }
 
+impl std::default::Default for DeviceInfo {
+    fn default() -> Self {
+        Self {
+            sample_format: SampleFormat::F32,
+            sample_rate: 44100,
+            channels: 2,
+        }
+    }
+}
+
 /// Desired options for a sound device
 ///
 /// If an option is not given, then the default config will be used for it. This includes the

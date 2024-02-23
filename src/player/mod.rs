@@ -8,9 +8,11 @@ pub mod prelude {
 }
 
 use std::ops::ControlFlow;
+use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crossbeam::atomic::AtomicCell;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
@@ -39,6 +41,18 @@ pub enum AudioControl {
     SetState(PlayState),
 }
 
+struct Shared {
+    play_state: AtomicCell<PlayState>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Self {
+            play_state: AtomicCell::new(PlayState::Stopped),
+        }
+    }
+}
+
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
 pub struct Player<D: Decoder, E: Effect, A: Audio> {
@@ -47,11 +61,14 @@ pub struct Player<D: Decoder, E: Effect, A: Audio> {
     effects: E,
     audio: A,
     options: DeviceOptions,
+    shared: Arc<Shared>,
 }
 
 impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
     fn new(decoder: D, effects: E, audio: A, options: DeviceOptions) -> (Self, Handle) {
         let (sender, receiver) = crossbeam_channel::unbounded();
+        let shared: Arc<Shared> = Arc::default();
+        let weak = Arc::downgrade(&shared);
         (
             Self {
                 handle: receiver,
@@ -59,8 +76,12 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
                 effects,
                 audio,
                 options,
+                shared,
             },
-            Handle { handle: sender },
+            Handle {
+                handle: sender,
+                shared: weak,
+            },
         )
     }
 
@@ -95,6 +116,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
             decoder,
             audio_control,
             handle: &self.handle,
+            shared: &self.shared,
         };
 
         inner.run_blocking()
@@ -125,6 +147,7 @@ struct Inner<'a, D: Decoder> {
     decoder: PlayerDecoder<'a, D>,
     audio_control: Sender<AudioControl>,
     handle: &'a Receiver<Message>,
+    shared: &'a Shared,
 }
 
 impl<'a, D: Decoder> Inner<'a, D> {
@@ -152,9 +175,12 @@ impl<'a, D: Decoder> Inner<'a, D> {
     fn handle(&mut self, message: Message) -> PlayerResult<()> {
         match message {
             Message::Play(source) => {
-                self.decoder.decode(&source);
                 // make sure it's playing
                 self.update_play_state(PlayState::Playing)?;
+                // flush the packets from the previous song
+                self.send_control(AudioControl::Flush)?;
+                // start playing a new one
+                self.decoder.decode(&source);
             }
             Message::SetState(new) => self.update_play_state(new)?,
         }
@@ -178,7 +204,11 @@ impl<'a, D: Decoder> Inner<'a, D> {
             _ => (),
         }
 
+        // update all the different play states
         self.play_state = new;
+        // shared is a different play state so that this doesn't have to query it every packet
+        self.shared.play_state.store(new);
+        // the audio also has to know so it could send empty data
         self.send_control(AudioControl::SetState(new))?;
         Ok(())
     }
@@ -197,49 +227,119 @@ impl<'a, D: Decoder> Inner<'a, D> {
     }
 }
 
+/// A handle to a [`Player`] that could control it or query its info
+///
+// /// # Examples
+// ///
+// /// ```
+// /// use sauti::player::prelude::*;
+// /// use sauti::test::prelude::*;
+// /// use std::time::Duration;
+// /// use std::thread::sleep;
+// /// # fn main() -> Result<(), sauti::player::Disconnected> {
+// ///
+// /// // create a new empty player (it ignores audio)
+// /// let handle = Empty::player().run();
+// ///
+// /// // start playing an imaginary file
+// /// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
+// /// handle.play("")?;
+// /// // it may take a bit for the player to recieve the message
+// /// sleep(Duration::from_millis(100));
+// /// // once the player starts playing, it changes to [`PlayState::Playing`]
+// /// assert_eq!(handle.play_state()?, PlayState::Playing);
+// ///
+// /// // the handle can also pause
+// /// handle.pause()?;
+// /// sleep(Duration::from_millis(100));
+// /// assert_eq!(handle.play_state()?, PlayState::Paused);
+// ///
+// /// # Ok(())
+// /// # }
+// /// ```
 #[derive(Clone)]
 pub struct Handle {
     handle: Sender<Message>,
+    // TODO: measure the cost of this
+    shared: Weak<Shared>,
 }
 
-/// The handle could not send a message because it was disconnected
+/// A [`Handle`] could not connect to its respective [`Player`]
 #[derive(Error, Debug)]
 #[error("player was disconnected")]
 pub struct Disconnected;
 
-macro_rules! send {
-    ($self:ident, $val:expr) => {
-        $self.handle.send($val).map_err(|_| Disconnected)
-    };
-}
-
 impl Handle {
+    fn send(&self, message: Message) -> Result<(), Disconnected> {
+        self.handle.send(message).map_err(|_| Disconnected)
+    }
+
+    /// Make the player start playing `source`
+    ///
     /// # Errors
     ///
     /// - If the player is disconnected
     pub fn play(&self, source: impl Into<MediaSource>) -> Result<(), Disconnected> {
-        send!(self, Message::Play(source.into()))
+        self.send(Message::Play(source.into()))
     }
 
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`
+    ///
+    /// # Errors
+    ///
+    /// - If the player is disconnected
+    pub fn set_state(&self, play_state: PlayState) -> Result<(), Disconnected> {
+        self.send(Message::SetState(play_state))
+    }
+
+    /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
+    ///
     /// # Errors
     ///
     /// - If the player is disconnected
     pub fn pause(&self) -> Result<(), Disconnected> {
-        send!(self, Message::SetState(PlayState::Paused))
+        self.set_state(PlayState::Paused)
     }
 
+    /// Change the [`Player`]'s [`PlayState`] to [`Playing`](PlayState::Playing)
+    ///
     /// # Errors
     ///
     /// - If the player is disconnected
     pub fn resume(&self) -> Result<(), Disconnected> {
-        send!(self, Message::SetState(PlayState::Playing))
+        self.set_state(PlayState::Playing)
     }
 
+    /// Change the [`Player`]'s [`PlayState`] to [`Stopped`](PlayState::Stopped)
+    ///
     /// # Errors
     ///
     /// - If the player is disconnected
     pub fn stop(&self) -> Result<(), Disconnected> {
-        send!(self, Message::SetState(PlayState::Stopped))
+        self.set_state(PlayState::Stopped)
+    }
+
+    /// Get a value from the [`Shared`] reference,
+    /// or return [`Disconnected`] if it's dropped
+    fn get<T>(&self, func: impl FnOnce(&Shared) -> T) -> Result<T, Disconnected> {
+        self.shared
+            .upgrade()
+            .map_or(Err(Disconnected), |shared| Ok(func(&shared)))
+    }
+
+    /// Get the current play state of the [`Player`]
+    ///
+    /// # Errors
+    ///
+    /// - If the player is disconnected
+    pub fn play_state(&self) -> Result<PlayState, Disconnected> {
+        self.get(|shared| shared.play_state.load())
+    }
+
+    /// Returns `true` if the [`Player`] has disconnected
+    #[must_use]
+    pub fn disconnected(&self) -> bool {
+        self.shared.strong_count() == 0
     }
 }
 

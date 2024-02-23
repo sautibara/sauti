@@ -13,12 +13,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    const DEFAULT_INFO: DeviceInfo = DeviceInfo {
-        channels: 2,
-        sample_format: SampleFormat::F32,
-        sample_rate: 44100,
-    };
-
     #[must_use]
     pub fn take(amount: usize) -> (Self, Handle) {
         let (sender, reciever) = crossbeam_channel::bounded(0);
@@ -53,23 +47,45 @@ impl Handle {
 }
 
 impl Audio for Collector {
-    fn start<B: SoundSource>(
+    fn start<S: SoundSource>(
         &self,
         options: impl Into<DeviceOptions>,
-        source: B,
+        source: S,
     ) -> AudioResult<Box<dyn crate::audio::Device>> {
-        let info = Self::DEFAULT_INFO.apply(&options.into());
+        let info = DeviceInfo::default().apply(&options.into());
         let device = match info.sample_format {
-            SampleFormat::I8 => Device::<i8, B>::start_new_boxed(self, info, source),
-            SampleFormat::I16 => Device::<i16, B>::start_new_boxed(self, info, source),
-            SampleFormat::I32 => Device::<i32, B>::start_new_boxed(self, info, source),
-            SampleFormat::I64 => Device::<i64, B>::start_new_boxed(self, info, source),
-            SampleFormat::U8 => Device::<u8, B>::start_new_boxed(self, info, source),
-            SampleFormat::U16 => Device::<u16, B>::start_new_boxed(self, info, source),
-            SampleFormat::U32 => Device::<u32, B>::start_new_boxed(self, info, source),
-            SampleFormat::U64 => Device::<u64, B>::start_new_boxed(self, info, source),
-            SampleFormat::F32 => Device::<f32, B>::start_new_boxed(self, info, source),
-            SampleFormat::F64 => Device::<f64, B>::start_new_boxed(self, info, source),
+            SampleFormat::I8 => Device::<i8, S>::start_new_boxed(self, info, source),
+            SampleFormat::I16 => Device::<i16, S>::start_new_boxed(self, info, source),
+            SampleFormat::I32 => Device::<i32, S>::start_new_boxed(self, info, source),
+            SampleFormat::I64 => Device::<i64, S>::start_new_boxed(self, info, source),
+            SampleFormat::U8 => Device::<u8, S>::start_new_boxed(self, info, source),
+            SampleFormat::U16 => Device::<u16, S>::start_new_boxed(self, info, source),
+            SampleFormat::U32 => Device::<u32, S>::start_new_boxed(self, info, source),
+            SampleFormat::U64 => Device::<u64, S>::start_new_boxed(self, info, source),
+            SampleFormat::F32 => Device::<f32, S>::start_new_boxed(self, info, source),
+            SampleFormat::F64 => Device::<f64, S>::start_new_boxed(self, info, source),
+            _ => todo!(),
+        };
+        Ok(device)
+    }
+
+    fn start_paused<S: SoundSource>(
+        &self,
+        options: impl Into<DeviceOptions>,
+        source: S,
+    ) -> AudioResult<Box<dyn crate::audio::Device>> {
+        let info = DeviceInfo::default().apply(&options.into());
+        let device = match info.sample_format {
+            SampleFormat::I8 => Device::<i8, S>::start_paused_boxed(self, info, source),
+            SampleFormat::I16 => Device::<i16, S>::start_paused_boxed(self, info, source),
+            SampleFormat::I32 => Device::<i32, S>::start_paused_boxed(self, info, source),
+            SampleFormat::I64 => Device::<i64, S>::start_paused_boxed(self, info, source),
+            SampleFormat::U8 => Device::<u8, S>::start_paused_boxed(self, info, source),
+            SampleFormat::U16 => Device::<u16, S>::start_paused_boxed(self, info, source),
+            SampleFormat::U32 => Device::<u32, S>::start_paused_boxed(self, info, source),
+            SampleFormat::U64 => Device::<u64, S>::start_paused_boxed(self, info, source),
+            SampleFormat::F32 => Device::<f32, S>::start_paused_boxed(self, info, source),
+            SampleFormat::F64 => Device::<f64, S>::start_paused_boxed(self, info, source),
             _ => todo!(),
         };
         Ok(device)
@@ -115,6 +131,14 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
         Box::new(new)
     }
 
+    fn start_paused_boxed(
+        sink: &Collector,
+        info: DeviceInfo,
+        source: B,
+    ) -> Box<dyn crate::audio::Device> {
+        Box::new(Self::new(sink, info, source))
+    }
+
     fn start_blocking(
         mut source: impl Sound<S>,
         sender: &Sender<GenericPacket>,
@@ -138,12 +162,14 @@ impl<S: ConvertibleSample, B: SoundSource> crate::audio::Device for Device<S, B>
     }
 
     fn pause(&mut self) -> AudioResult<()> {
-        // pausing and playing don't do anything
+        // pausing doesn't do anything so far
         Ok(())
     }
 
     fn resume(&mut self) -> AudioResult<()> {
-        // pausing and playing don't do anything
+        if self.current.is_none() {
+            self.start();
+        }
         Ok(())
     }
 
