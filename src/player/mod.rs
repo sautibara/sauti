@@ -15,7 +15,7 @@ pub mod prelude {
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock, Weak};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -53,7 +53,15 @@ enum AudioControl {
 struct Shared {
     play_state: AtomicCell<PlayState>,
     volume: AtomicCell<f64>,
-    times: RwLock<Option<Times>>,
+    // NOTE: not sure if this is the best way to do it
+    // Currently, some data is behind two atomics, but this is probably impossible to circumvent,
+    // as some data isn't atomic anyways, and it still has to be changed (ex: the duration of a
+    // song still has to be changed in between songs).
+    // It would also be great if this could be atomic rather than a RwLock,
+    // but AtomicCell<Arc> wouldn't even work because Arc isn't Copy
+    // and AtomicCell<Option<Box<dyn StreamTimes>>> doesn't work because StreamTimes can't be Copy
+    // because none of the atomics are Copy
+    times: RwLock<Option<Box<dyn StreamTimes>>>,
 }
 
 impl Shared {
@@ -217,7 +225,12 @@ impl<'a, D: Decoder> Inner<'a, D> {
         // start playing a new one
         self.decoder.decode(source);
         // update the shared times
-        self.new_times()?;
+        if let Some(stream) = self.decoder.stream() {
+            let mut times = (self.shared.times)
+                .write()
+                .map_err(|_| PlayerError::Disconnected)?;
+            *times = Some(stream.times());
+        }
         Ok(())
     }
 
@@ -250,13 +263,6 @@ impl<'a, D: Decoder> Inner<'a, D> {
         self.shared.play_state.store(new);
         // the audio also has to know so it could send empty data
         self.send_control(AudioControl::SetState(new))?;
-
-        // update the shared position
-        match new {
-            PlayState::Paused | PlayState::Stopped => self.map_times(Times::pause)?,
-            PlayState::Playing => self.map_times(Times::resume)?,
-        }
-        self.update_times()?;
         Ok(())
     }
 
@@ -276,7 +282,6 @@ impl<'a, D: Decoder> Inner<'a, D> {
     pub fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_to(duration))?;
-        self.update_times()?;
         self.send_control(AudioControl::Flush)?;
         Ok(())
     }
@@ -288,7 +293,6 @@ impl<'a, D: Decoder> Inner<'a, D> {
     pub fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_by(duration, direction))?;
-        self.update_times()?;
         self.send_control(AudioControl::Flush)?;
         Ok(())
     }
@@ -317,84 +321,6 @@ impl<'a, D: Decoder> Inner<'a, D> {
         self.audio_control
             .send(message)
             .map_err(|_| PlayerError::AudioDisconnected)
-    }
-
-    fn update_times(&self) -> PlayerResult<()> {
-        if let Some(stream) = self.decoder.stream() {
-            self.map_times(|times| times.update(stream))?;
-        }
-        Ok(())
-    }
-
-    fn map_times(&self, func: impl FnOnce(&mut Times)) -> PlayerResult<()> {
-        self.mut_times(|times| {
-            if let Some(times) = times {
-                func(times);
-            }
-        })
-    }
-
-    fn mut_times(&self, func: impl FnOnce(&mut Option<Times>)) -> PlayerResult<()> {
-        self.shared.times.write().map_or_else(
-            |_| Err(PlayerError::Disconnected),
-            |mut times| {
-                func(&mut times);
-                Ok(())
-            },
-        )
-    }
-
-    fn new_times(&self) -> PlayerResult<()> {
-        if let Some(stream) = self.decoder.stream() {
-            self.mut_times(|times| *times = Some(Times::new(stream)))?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Times {
-    position: Duration,
-    duration: Duration,
-    last_checked: Instant,
-    playing: bool,
-}
-
-impl Times {
-    fn new(stream: &dyn AudioStream) -> Self {
-        Self {
-            position: stream.position(),
-            duration: stream.duration(),
-            last_checked: Instant::now(),
-            playing: true,
-        }
-    }
-
-    const fn duration(&self) -> Duration {
-        self.duration
-    }
-
-    fn position(&self) -> Duration {
-        self.position
-            + if self.playing {
-                Instant::now().duration_since(self.last_checked)
-            } else {
-                Duration::ZERO
-            }
-    }
-
-    fn update(&mut self, stream: &dyn AudioStream) {
-        self.position = stream.position();
-        self.duration = stream.duration();
-        self.last_checked = Instant::now();
-    }
-
-    fn pause(&mut self) {
-        self.playing = false;
-    }
-
-    fn resume(&mut self) {
-        self.playing = true;
     }
 }
 
@@ -433,7 +359,7 @@ impl Times {
 #[derive(Clone)]
 pub struct Handle {
     handle: Sender<Message>,
-    // TODO: measure the cost of this
+    // TODO: measure the cost of using Weak instead of Arc
     shared: Weak<Shared>,
 }
 
@@ -507,20 +433,35 @@ impl Handle {
         self.get(|shared| shared.volume.load())
     }
 
-    fn map_times<T>(&self, func: impl FnOnce(Times) -> T) -> Result<Option<T>, Disconnected> {
-        let shared = self.shared.upgrade().ok_or(Disconnected)?;
-        let pos = (shared.times.read()).map_err(|_| Disconnected)?.map(func);
-        Ok(pos)
+    /// Read the shared [`StreamTimes`], mapping it using `func` if it exists or returning [`None`] otherwise
+    fn map_times<T>(
+        &self,
+        func: impl FnOnce(&dyn StreamTimes) -> T,
+    ) -> Result<Option<T>, Disconnected> {
+        self.get(|shared| {
+            (shared.times.read()).map_or(Err(Disconnected), |times_opt| {
+                Ok(times_opt.as_deref().map(func))
+            })
+        })?
     }
 
-    /// Get the current [`Duration`] from the start of the playing [`AudioStream`]
+    /// Get the current [`Duration`] from the start of the playing [`AudioStream`], or [`None`] if
+    /// there is no stream playing
     pub fn position(&self) -> Result<Option<Duration>, Disconnected> {
         self.map_times(|times| times.position())
     }
 
-    /// Get the length of the current [`AudioStream`]
+    /// Get the length of the current [`AudioStream`], or [`None`] if there is no stream playing
     pub fn duration(&self) -> Result<Option<Duration>, Disconnected> {
         self.map_times(|times| times.duration())
+    }
+
+    /// Get the [position](Self::position) and [duration](Self::duration) of the current
+    /// [`AudioStream`] in a tuple, or [`None`] if there is no stream playing.
+    ///
+    /// It is laid out as `(position, duration)`
+    pub fn times(&self) -> Result<Option<(Duration, Duration)>, Disconnected> {
+        self.map_times(|times| (times.position(), times.duration()))
     }
 
     /// Returns `true` if the [`Player`] has disconnected

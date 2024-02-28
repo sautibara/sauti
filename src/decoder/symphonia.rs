@@ -1,5 +1,6 @@
-use std::{fs::File, io::Cursor, ops::Deref, option::Option, time::Duration};
+use std::{fs::File, io::Cursor, ops::Deref, option::Option, sync::Arc, time::Duration};
 
+use crossbeam::atomic::AtomicCell;
 use symphonia::core::{
     audio::{AudioBuffer, AudioBufferRef, Signal},
     codecs::{CodecRegistry, DecoderOptions},
@@ -77,7 +78,7 @@ impl Symphonia {
         let stream = Stream {
             file: reader.format,
             decoder,
-            current_frame: 0,
+            current_frame: Arc::default(),
             sample_rate: sample_rate as usize,
             frame_count: usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
             error_source,
@@ -114,7 +115,7 @@ struct Stream {
     error_source: ErrorSource,
     file: Box<dyn FormatReader>,
     decoder: Box<dyn SymphoniaDecoder>,
-    current_frame: usize,
+    current_frame: Arc<AtomicCell<usize>>,
     frame_count: usize,
     sample_rate: usize,
     time_base: TimeBase,
@@ -131,7 +132,7 @@ impl AudioStream for Stream {
         let symphonia_packet = (self.decoder)
             .decode(&undecoded_packet)
             .map_err(|err| map_error_with_source(err, &self.error_source))?;
-        self.current_frame += symphonia_packet.frames();
+        self.current_frame.fetch_add(symphonia_packet.frames());
         let packet = symphonia_packet.into();
         Ok(Some(packet))
     }
@@ -151,16 +152,21 @@ impl AudioStream for Stream {
             )
             .map_err(|err| map_error_with_source(err, &self.error_source))?;
         self.decoder.reset();
-        self.current_frame = self.time_stamp_to_frame(seeked_to.actual_ts);
+        self.current_frame
+            .store(self.time_stamp_to_frame(seeked_to.actual_ts));
         Ok(())
     }
 
     fn position(&self) -> Duration {
-        super::frame_to_duration(self.current_frame, self.sample_rate)
+        super::frame_to_duration(self.current_frame.load(), self.sample_rate)
     }
 
     fn duration(&self) -> Duration {
         super::frame_to_duration(self.frame_count, self.sample_rate)
+    }
+
+    fn times(&self) -> Box<dyn StreamTimes> {
+        Box::new(Times::new(self))
     }
 }
 
@@ -173,6 +179,39 @@ impl Stream {
             time_stamp as usize * self.sample_rate * self.time_base.numer as usize
                 / self.time_base.denom as usize
         }
+    }
+}
+
+struct Times {
+    current_frame: Arc<AtomicCell<usize>>,
+    frame_count: usize,
+    sample_rate: usize,
+}
+
+impl Times {
+    fn new(
+        Stream {
+            current_frame,
+            frame_count,
+            sample_rate,
+            ..
+        }: &Stream,
+    ) -> Self {
+        Self {
+            current_frame: current_frame.clone(),
+            frame_count: *frame_count,
+            sample_rate: *sample_rate,
+        }
+    }
+}
+
+impl StreamTimes for Times {
+    fn duration(&self) -> Duration {
+        super::frame_to_duration(self.frame_count, self.sample_rate)
+    }
+
+    fn position(&self) -> Duration {
+        super::frame_to_duration(self.current_frame.load(), self.sample_rate)
     }
 }
 

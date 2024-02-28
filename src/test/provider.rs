@@ -52,4 +52,24 @@ impl AudioStream for Provider {
         let sample_rate = self.packet.spec().sample_rate;
         crate::decoder::frame_to_duration(frames, sample_rate)
     }
+
+    fn times(&self) -> Box<dyn StreamTimes> {
+        Box::new(Times {
+            duration: self.duration(),
+        })
+    }
+}
+
+struct Times {
+    duration: Duration,
+}
+
+impl StreamTimes for Times {
+    fn position(&self) -> Duration {
+        Duration::ZERO
+    }
+
+    fn duration(&self) -> Duration {
+        self.duration
+    }
 }

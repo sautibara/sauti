@@ -38,7 +38,9 @@ mod symphonia;
 
 /// Useful types for interacting with a [`Decoder`]
 pub mod prelude {
-    pub use super::{AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult};
+    pub use super::{
+        AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult, StreamTimes,
+    };
     pub use crate::data::prelude::*;
 }
 
@@ -92,6 +94,8 @@ pub trait Decoder: Send + 'static {
             .unwrap_or(Err(DecoderError::UnsupportedFormat(source.into())))
     }
 }
+
+// TODO: move the burden of providing a Sync obtainer for position and duration to the AudioStream
 
 /// A decoded stream of audio
 ///
@@ -147,6 +151,14 @@ pub trait AudioStream {
     fn position(&self) -> Duration;
     /// Measure the full duration of the stream, in seconds
     fn duration(&self) -> Duration;
+
+    /// Obtain an [atomic](std::sync::atomic) reference to the stream's position and duration
+    ///
+    /// If an atomic reference isn't necessary, then use [`Self::position`] and [`Self::duration`]
+    /// instead, as they may be more efficient.
+    ///
+    /// See [`StreamTimes`] for more information
+    fn times(&self) -> Box<dyn StreamTimes>;
 }
 
 /// Methods specific for an [`AudioStream`] trait object ([`Box<dyn AudioStream>`])
@@ -177,6 +189,21 @@ impl AudioStreamExt for Box<dyn AudioStream> {
     }
 }
 
+/// An [atomic](std::sync::atomic) reference to a stream's position and duration
+///
+/// This reference is synchronized to the stream, even if it moves to a different thread. This
+/// allows a player's [`Handle`](crate::player::Handle) to give an exact position when queried,
+/// even if the stream lags when playing.
+pub trait StreamTimes: Send + Sync {
+    /// Measure the current position of the stream, in seconds
+    ///
+    /// The position is measured as the duration from the start of the stream
+    /// to the end of the last given packet
+    fn position(&self) -> Duration;
+    /// Measure the full duration of the stream, in seconds
+    fn duration(&self) -> Duration;
+}
+
 /// An iterator over packets returned by an [`AudioStream`]
 ///
 /// Obtained using [`AudioStreamExt::iter`]
@@ -194,7 +221,7 @@ impl Iterator for Iter<'_> {
 /// A direction, either [forward](Self::Forward) or [backward](Self::Backward)
 ///
 /// Used by [`AudioStream::seek_by`]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     Forward,
     Backward,

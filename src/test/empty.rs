@@ -122,6 +122,20 @@ impl AudioStream for Empty {
     fn duration(&self) -> Duration {
         Duration::ZERO
     }
+
+    fn times(&self) -> Box<dyn StreamTimes> {
+        Box::new(Self)
+    }
+}
+
+impl StreamTimes for Empty {
+    fn duration(&self) -> Duration {
+        Duration::ZERO
+    }
+
+    fn position(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 impl Effect for Empty {

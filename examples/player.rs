@@ -12,6 +12,11 @@ pub fn main() -> Result<(), Disconnected> {
 
     handle.play(path)?;
 
+    // loop {
+    //     println!("{:?}", handle.times());
+    //     std::thread::sleep(Duration::from_millis(1));
+    // }
+
     std::io::stdin()
         .read_line(&mut String::new())
         .expect("failed to read stdin");
