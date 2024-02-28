@@ -37,6 +37,10 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         Ok(())
     }
 
+    pub fn stream(&self) -> Option<&dyn AudioStream> {
+        self.current_stream.as_deref()
+    }
+
     pub fn send_next_packet(&mut self) -> PlayerResult<bool> {
         let Some(packet) = self.next_packet() else {
             // nothing was sent
