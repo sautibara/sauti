@@ -28,6 +28,7 @@ pub mod effects {
     pub use super::resample::Resample;
     pub use super::resize_channels::ResizeChannels;
     pub use super::volume::Constant as ConstantVolume;
+    pub use super::volume::Handle as VolumeHandle;
     pub use super::volume::Volume;
 }
 

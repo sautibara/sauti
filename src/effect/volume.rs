@@ -40,10 +40,12 @@ impl Effect for Volume {
 pub struct Handle(Arc<AtomicCell<f64>>);
 
 impl Handle {
+    #[must_use]
     pub fn new(initial: f64) -> Self {
         Self(Arc::new(AtomicCell::new(initial)))
     }
 
+    #[must_use]
     pub fn get(&self) -> f64 {
         self.0.load()
     }
