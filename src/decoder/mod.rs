@@ -189,7 +189,7 @@ impl AudioStreamExt for Box<dyn AudioStream> {
     }
 }
 
-/// An [atomic](std::sync::atomic) reference to a stream's position and duration
+/// A [synchronized](std::sync) reference to a stream's position and duration
 ///
 /// This reference is synchronized to the stream, even if it moves to a different thread. This
 /// allows a player's [`Handle`](crate::player::Handle) to give an exact position when queried,

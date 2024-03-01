@@ -55,8 +55,8 @@ struct Shared {
     volume: AtomicCell<f64>,
     // NOTE: not sure if this is the best way to do it
     // Currently, some data is behind two atomics, but this is probably impossible to circumvent,
-    // as some data isn't atomic anyways, and it still has to be changed (ex: the duration of a
-    // song still has to be changed in between songs).
+    // as some data isn't atomic in StreamTimes (like the samplerate in the symphonia implementation),
+    // and it still has to be changed between different songs
     // It would also be great if this could be atomic rather than a RwLock,
     // but AtomicCell<Arc> wouldn't even work because Arc isn't Copy
     // and AtomicCell<Option<Box<dyn StreamTimes>>> doesn't work because StreamTimes can't be Copy
