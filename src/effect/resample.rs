@@ -8,6 +8,8 @@ use super::prelude::*;
 
 /// Resample the input [`SoundPacket`] to fit with the output [`StreamSpec`]
 ///
+/// Custom speeds are also possible with [`Resample::by`]
+///
 /// The current implementation uses [`rubato`]. This means that whenever the input or output
 /// [`StreamSpec`] change, or the amount of frames in the input [`SoundPacket`] changes, the
 /// resampler has to be remade, which is often fairly intensive. As such, it relies on the
@@ -18,29 +20,51 @@ use super::prelude::*;
 /// - If the input amount of channels is different than the output
 ///     - [`ResizeChannels`](super::effect::ResizeChannels) or some equivalent should probably be
 ///     used before this
-#[derive(Default)]
 pub struct Resample {
+    ratio: f64,
     resampler: Option<Inner>,
+}
+
+impl Default for Resample {
+    fn default() -> Self {
+        Self::by(1.0)
+    }
 }
 
 impl Clone for Resample {
     fn clone(&self) -> Self {
-        Self { resampler: None }
+        Self {
+            resampler: None,
+            ..*self
+        }
     }
 }
 
 impl Resample {
+    /// Resample using a custom `ratio` on top of the ratio necessary to get to the correct sample
+    /// rate. A ratio of `2.0`, for example, speeds up the packets by a factor of `2`.
+    ///
+    /// To resample by the default ratio, use [`Resample::default`].
+    #[must_use]
+    pub const fn by(ratio: f64) -> Self {
+        Self {
+            ratio,
+            resampler: None,
+        }
+    }
+
     fn resampler(
         &mut self,
         input_spec: &StreamSpec,
         output_spec: &StreamSpec,
         frame_count: usize,
+        ratio: f64,
     ) -> &mut Inner {
         let resampler_matches = (self.resampler.as_ref())
             .is_some_and(|resampler| resampler.matches(input_spec, output_spec, frame_count));
 
         if !resampler_matches {
-            let replacement = Inner::new(*input_spec, *output_spec, frame_count);
+            let replacement = Inner::new(*input_spec, *output_spec, frame_count, ratio);
             self.resampler = Some(replacement);
         }
 
@@ -64,7 +88,7 @@ impl Effect for Resample {
         }
 
         let frame_count = input.frames();
-        let resampler = self.resampler(input_spec, output_spec, frame_count);
+        let resampler = self.resampler(input_spec, output_spec, frame_count, self.ratio);
         let processed = resampler.process(input.convert());
         processed.convert()
     }
@@ -96,14 +120,19 @@ impl Inner {
         }
     }
 
-    fn new(input_spec: StreamSpec, output_spec: StreamSpec, input_frames: usize) -> Self {
+    fn new(
+        input_spec: StreamSpec,
+        output_spec: StreamSpec,
+        input_frames: usize,
+        ratio: f64,
+    ) -> Self {
         assert!(
             input_spec.channels == output_spec.channels,
             "input channel count should be the same as the output before resampling"
         );
 
         let resampler = SincFixedIn::new(
-            output_spec.sample_rate as f64 / input_spec.sample_rate as f64,
+            output_spec.sample_rate as f64 / input_spec.sample_rate as f64 / ratio,
             5.0, // this notably affects how big output_buffer will be
             Self::default_params(),
             input_frames,
