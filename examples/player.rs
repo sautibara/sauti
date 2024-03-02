@@ -12,28 +12,28 @@ pub fn main() -> Result<(), Disconnected> {
 
     handle.play(path)?;
 
-    // loop {
-    //     println!("{:?}", handle.times());
-    //     std::thread::sleep(Duration::from_millis(1));
-    // }
+    loop {
+        println!("{:?}", handle.play_state());
+        std::thread::sleep(Duration::from_millis(1));
+    }
 
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    // handle.pause()?;
-    handle.set_volume(0.1)?;
-
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    // handle.resume()?;
-    handle.set_volume(0.5)?;
-
-    std::io::stdin()
-        .read_line(&mut String::new())
-        .expect("failed to read stdin");
-
-    Ok(())
+    // std::io::stdin()
+    //     .read_line(&mut String::new())
+    //     .expect("failed to read stdin");
+    //
+    // // handle.pause()?;
+    // handle.set_volume(0.1)?;
+    //
+    // std::io::stdin()
+    //     .read_line(&mut String::new())
+    //     .expect("failed to read stdin");
+    //
+    // // handle.resume()?;
+    // handle.set_volume(0.5)?;
+    //
+    // std::io::stdin()
+    //     .read_line(&mut String::new())
+    //     .expect("failed to read stdin");
+    //
+    // Ok(())
 }

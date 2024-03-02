@@ -1,8 +1,23 @@
 use crossbeam_channel::Sender;
 use log::error;
 
-use super::prelude::*;
+use super::{on_end::OnEnd, prelude::*};
 use crate::decoder::prelude::*;
+
+pub enum NoPacket {
+    NoStream,
+    StreamEnded,
+}
+
+impl NoPacket {
+    /// Returns `true` if the no packet is [`StreamEnded`].
+    ///
+    /// [`StreamEnded`]: NoPacket::StreamEnded
+    #[must_use]
+    pub const fn is_stream_ended(&self) -> bool {
+        matches!(self, Self::StreamEnded)
+    }
+}
 
 // it conflicts with the other decoder module
 #[allow(clippy::module_name_repetitions)]
@@ -13,8 +28,8 @@ pub struct PlayerDecoder<'a, D: Decoder> {
 }
 
 impl<'a, D: Decoder> PlayerDecoder<'a, D> {
-    pub fn new<E: crate::effect::Effect, A: crate::audio::Audio>(
-        player: &'a Player<D, E, A>,
+    pub fn new<E: crate::effect::Effect, A: crate::audio::Audio, O: OnEnd<D>>(
+        player: &'a Player<D, E, A, O>,
         packet_sender: Sender<GenericPacket>,
     ) -> Self {
         Self {
@@ -41,28 +56,24 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         self.current_stream.as_deref()
     }
 
-    pub fn send_next_packet(&mut self) -> PlayerResult<bool> {
-        let Some(packet) = self.next_packet() else {
-            // nothing was sent
-            return Ok(false);
+    pub fn send_next_packet(&mut self) -> PlayerResult<Result<(), NoPacket>> {
+        let packet = match self.next_packet()? {
+            Ok(packet) => packet,
+            Err(no_packet) => return Ok(Err(no_packet)),
         };
 
         match self.packet_sender.send(packet) {
             // something was sent
-            Ok(()) => Ok(true),
+            Ok(()) => Ok(Ok(())),
             Err(_) => Err(PlayerError::AudioDisconnected),
         }
     }
 
-    fn next_packet(&mut self) -> Option<GenericPacket> {
-        let stream = self.current_stream.as_mut()?;
-        let packet = (stream.next_packet())
-            .map_err(|err| error!("error found while decoding: {err:?}"))
-            .ok()?;
-        if packet.is_none() {
-            self.current_stream = None;
-        }
-        packet
+    fn next_packet(&mut self) -> PlayerResult<Result<GenericPacket, NoPacket>> {
+        let Some(stream) = self.current_stream.as_mut() else {
+            return Ok(Err(NoPacket::NoStream));
+        };
+        Ok(stream.next_packet()?.ok_or(NoPacket::StreamEnded))
     }
 
     pub fn decode(&mut self, source: &MediaSource) {

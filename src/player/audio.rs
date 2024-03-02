@@ -4,6 +4,7 @@ use crate::decoder::Decoder;
 use crate::effect::prelude::*;
 use crate::{audio::prelude::*, effect::List};
 
+use super::on_end::OnEnd;
 use super::{AudioControl, Player};
 
 #[derive(Clone)]
@@ -14,8 +15,8 @@ pub struct PacketPlayer<E: Effect> {
 }
 
 impl<E: Effect> PacketPlayer<E> {
-    pub fn new<D: Decoder, A: Audio>(
-        player: &Player<D, E, A>,
+    pub fn new<D: Decoder, A: Audio, O: OnEnd<D>>(
+        player: &Player<D, E, A, O>,
         packets: Receiver<GenericPacket>,
         audio_control: Receiver<AudioControl>,
         volume: f64,

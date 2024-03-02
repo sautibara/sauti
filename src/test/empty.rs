@@ -4,7 +4,8 @@ use std::time::Duration;
 use crate::audio::prelude::*;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
-use crate::player::Player;
+use crate::player::on_end::OnEnd;
+use crate::player::prelude::*;
 
 /// Provides implementations for [`Decoder`], [`Audio`], and [`Effect`] that all do nothing
 #[derive(Clone, Copy)]
@@ -28,11 +29,12 @@ impl Empty {
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn player() -> crate::player::builder::Builder<Self, Self, Self> {
+    pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self> {
         Player::default_builder()
             .decoder(Self)
             .audio(Self)
             .effects(Self)
+            .on_end(Self)
     }
 
     fn drain_source<S: SoundSource>(source: &S, info: DeviceInfo) {
@@ -145,5 +147,11 @@ impl Effect for Empty {
         _output_spec: &StreamSpec,
     ) -> SoundPacket<S> {
         input
+    }
+}
+
+impl<D: Decoder> OnEnd<D> for Empty {
+    fn on_end(&self, _: &mut crate::player::Inner<D, Self>) -> crate::player::PlayerResult<()> {
+        Ok(())
     }
 }

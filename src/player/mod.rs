@@ -3,7 +3,7 @@
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
-        builder::Builder as PlayerBuilder, PlayState, Player, PlayerError, PlayerResult,
+        builder::Builder as PlayerBuilder, on_end, PlayState, Player, PlayerError, PlayerResult,
     };
     pub use crate::audio::DeviceOptions;
     pub use crate::data::prelude::*;
@@ -28,11 +28,13 @@ use crate::effect::prelude::*;
 
 use self::audio::PacketPlayer;
 use self::builder::{Builder, DefaultAudio, DefaultDecoder, DefaultEffect};
-use self::decoder::PlayerDecoder;
+use self::decoder::{NoPacket, PlayerDecoder};
+use self::on_end::OnEnd;
 
 mod audio;
 pub mod builder;
 mod decoder;
+pub mod on_end;
 
 #[derive(Debug)]
 enum Message {
@@ -76,27 +78,32 @@ impl Shared {
 
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
-pub struct Player<D: Decoder, E: Effect, A: Audio> {
+pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnEnd<D>> {
     handle: Receiver<Message>,
     decoder: D,
     effects: E,
     audio: A,
+    on_end: O,
     options: DeviceOptions,
     shared: Arc<Shared>,
 }
 
-impl Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default> {
+impl
+    Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default, on_end::Default>
+{
     #[must_use]
-    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
+    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default>
+    {
         Builder::default()
     }
 }
 
-impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
+impl<D: Decoder, E: Effect, A: Audio, O: OnEnd<D>> Player<D, E, A, O> {
     fn new(
         decoder: D,
         effects: E,
         audio: A,
+        on_end: O,
         options: DeviceOptions,
         volume: f64,
     ) -> (Self, Handle) {
@@ -111,6 +118,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
                 audio,
                 options,
                 shared,
+                on_end,
             },
             Handle {
                 handle: sender,
@@ -156,6 +164,7 @@ impl<D: Decoder, E: Effect, A: Audio> Player<D, E, A> {
             audio_control,
             handle: &self.handle,
             shared: &self.shared,
+            on_end: &self.on_end,
         };
 
         inner.run_blocking()
@@ -173,16 +182,17 @@ macro_rules! recv_or_break {
 }
 
 #[allow(clippy::struct_field_names)] // "play state" is its own thing
-pub struct Inner<'a, D: Decoder> {
+pub struct Inner<'a, D: Decoder, O: OnEnd<D>> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
     audio_control: Sender<AudioControl>,
     handle: &'a Receiver<Message>,
     shared: &'a Shared,
+    on_end: &'a O,
 }
 
-impl<'a, D: Decoder> Inner<'a, D> {
+impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
     fn run_blocking(&mut self) -> PlayerResult<()> {
         while self.tick()?.is_continue() {}
 
@@ -193,14 +203,25 @@ impl<'a, D: Decoder> Inner<'a, D> {
         // if there's a message waiting, then handle it
         recv_or_break!(self.handle.try_recv() => |message| self.handle(message));
 
-        // NOTE: this blocks until the packet is sent
-        // if it doesn't send (and thus returns false),
-        // then it blocks on the message reciever instead
-        // TODO: stop after file finishes
-        if !(self.play_state.is_playing() && self.decoder.send_next_packet()?) {
-            recv_or_break!(self.handle.recv() => |message| self.handle(message));
+        if self.play_state.is_playing() {
+            match self.decoder.send_next_packet()? {
+                Err(reason) => self.no_packet(&reason),
+                Ok(()) => Ok(ControlFlow::Continue(())),
+            }
+        } else {
+            Ok(ControlFlow::Continue(()))
+        }
+    }
+
+    fn no_packet(&mut self, reason: &NoPacket) -> PlayerResult<ControlFlow<()>> {
+        // if the stream just ended, then run on_end
+        if reason.is_stream_ended() {
+            self.on_end.on_end(self)?;
         }
 
+        // no packet was sent, so we must block on a message
+        // so that there isn't an infinite loop
+        recv_or_break!(self.handle.recv() => |message| self.handle(message));
         Ok(ControlFlow::Continue(()))
     }
 

@@ -4,7 +4,7 @@ use crate::{
     effect::{Effect, List},
 };
 
-use super::{Handle, Player};
+use super::{on_end::OnEnd, prelude::*, Handle};
 
 macro_rules! impl_supplier {
     (prefix: $prefix:path, trait: $trait:ty) => {
@@ -49,15 +49,18 @@ impl<E: EffectSupplier, N: EffectSupplier> EffectSupplier for EffectListSupplier
     }
 }
 
-pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> {
+pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>> {
     decoder: D,
     effects: E,
     audio: A,
     options: DeviceOptions,
     volume: f64,
+    on_end: O,
 }
 
-impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
+impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
+    Builder<D, E, A, O>
+{
     pub fn run(self) -> Handle {
         let (player, handle) = self.build();
         player.run();
@@ -65,40 +68,31 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
     }
 
     #[allow(clippy::type_complexity)] // it's only complex because of the ::Out
-    pub fn build(self) -> (Player<D::Out, E::Out, A::Out>, Handle) {
+    pub fn build(self) -> (Player<D::Out, E::Out, A::Out, O>, Handle) {
         Player::new(
             self.decoder.give(),
             self.effects.give(),
             self.audio.give(),
+            self.on_end,
             self.options,
             self.volume,
         )
     }
 
     #[must_use]
-    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A> {
-        Builder {
-            decoder,
-            effects: self.effects,
-            audio: self.audio,
-            options: self.options,
-            volume: self.volume,
-        }
-    }
-
-    #[must_use]
-    pub fn effects<N: Effect>(self, effects: N) -> Builder<D, N, A> {
+    pub fn effects<N: Effect>(self, effects: N) -> Builder<D, N, A, O> {
         Builder {
             decoder: self.decoder,
             effects,
             audio: self.audio,
             options: self.options,
             volume: self.volume,
+            on_end: self.on_end,
         }
     }
 
     #[must_use]
-    pub fn add_effect<N: Effect>(self, effect: N) -> Builder<D, EffectListSupplier<E, N>, A> {
+    pub fn add_effect<N: Effect>(self, effect: N) -> Builder<D, EffectListSupplier<E, N>, A, O> {
         Builder {
             decoder: self.decoder,
             effects: EffectListSupplier {
@@ -108,17 +102,31 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
             audio: self.audio,
             options: self.options,
             volume: self.volume,
+            on_end: self.on_end,
         }
     }
 
     #[must_use]
-    pub fn audio<N: Audio>(self, audio: N) -> Builder<D, E, N> {
+    pub fn audio<N: Audio>(self, audio: N) -> Builder<D, E, N, O> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
             audio,
             options: self.options,
             volume: self.volume,
+            on_end: self.on_end,
+        }
+    }
+
+    #[must_use]
+    pub fn on_end<N: OnEnd<D::Out>>(self, on_end: N) -> Builder<D, E, A, N> {
+        Builder {
+            effects: self.effects,
+            decoder: self.decoder,
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+            on_end,
         }
     }
 
@@ -133,7 +141,21 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A> {
     }
 }
 
-impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
+impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A, on_end::Default> {
+    #[must_use]
+    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A, on_end::Default> {
+        Builder {
+            decoder,
+            effects: self.effects,
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+            on_end: on_end::default(),
+        }
+    }
+}
+
+impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default> {
     fn default() -> Self {
         Self {
             decoder: DefaultDecoder,
@@ -141,6 +163,7 @@ impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio> {
             audio: DefaultAudio,
             options: DeviceOptions::default(),
             volume: 1.0,
+            on_end: on_end::default(),
         }
     }
 }
