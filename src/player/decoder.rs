@@ -1,8 +1,8 @@
 use crossbeam_channel::Sender;
 use log::error;
 
-use super::{on_end::OnEnd, prelude::*};
-use crate::decoder::prelude::*;
+use super::{on_end::OnFileEnd, prelude::*};
+use crate::{audio::Audio, decoder::prelude::*, effect::Effect};
 
 pub enum NoPacket {
     NoStream,
@@ -28,7 +28,7 @@ pub struct PlayerDecoder<'a, D: Decoder> {
 }
 
 impl<'a, D: Decoder> PlayerDecoder<'a, D> {
-    pub fn new<E: crate::effect::Effect, A: crate::audio::Audio, O: OnEnd<D>>(
+    pub fn new<E: Effect, A: Audio, O: OnFileEnd>(
         player: &'a Player<D, E, A, O>,
         packet_sender: Sender<GenericPacket>,
     ) -> Self {

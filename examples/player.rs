@@ -1,9 +1,12 @@
-use sauti::player::{prelude::*, Disconnected};
+use sauti::player::prelude::*;
 
-pub fn main() -> Result<(), Disconnected> {
+pub fn main() -> Result<(), sauti::player::Disconnected> {
     env_logger::init();
 
-    let handle = Player::default_builder().volume(0.5).run();
+    let handle = Player::default_builder()
+        .volume(0.5)
+        .on_end(|player: &mut BoxedPlayer| player.stop())
+        .run();
 
     let Some(path) = std::env::args().nth(1) else {
         println!("usage: {{command}} {{path}}");
@@ -14,7 +17,7 @@ pub fn main() -> Result<(), Disconnected> {
 
     loop {
         println!("{:?}", handle.play_state());
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     // std::io::stdin()

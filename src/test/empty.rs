@@ -4,8 +4,10 @@ use std::time::Duration;
 use crate::audio::prelude::*;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
-use crate::player::on_end::OnEnd;
+use crate::player::on_end::OnFileEnd;
 use crate::player::prelude::*;
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
 
 /// Provides implementations for [`Decoder`], [`Audio`], and [`Effect`] that all do nothing
 #[derive(Clone, Copy)]
@@ -44,7 +46,9 @@ impl Empty {
             loop {
                 sound.next_frame(&mut vec[..]);
                 // sleep a little so the computer doesn't blow up
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::sleep(Duration::from_nanos(
+                    NANOS_PER_SEC / info.sample_rate as u64,
+                ));
             }
         });
     }
@@ -150,8 +154,8 @@ impl Effect for Empty {
     }
 }
 
-impl<D: Decoder> OnEnd<D> for Empty {
-    fn on_end(&self, _: &mut crate::player::Inner<D, Self>) -> crate::player::PlayerResult<()> {
+impl OnFileEnd for Empty {
+    fn file_ended(&self, _: &mut BoxedPlayer) -> crate::player::PlayerResult<()> {
         Ok(())
     }
 }

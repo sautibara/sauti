@@ -4,7 +4,7 @@ use crate::{
     effect::{Effect, List},
 };
 
-use super::{on_end::OnEnd, prelude::*, Handle};
+use super::{on_end::OnFileEnd, prelude::*, Handle};
 
 macro_rules! impl_supplier {
     (prefix: $prefix:path, trait: $trait:ty) => {
@@ -49,7 +49,7 @@ impl<E: EffectSupplier, N: EffectSupplier> EffectSupplier for EffectListSupplier
     }
 }
 
-pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>> {
+pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> {
     decoder: D,
     effects: E,
     audio: A,
@@ -58,9 +58,7 @@ pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: O
     on_end: O,
 }
 
-impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
-    Builder<D, E, A, O>
-{
+impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Builder<D, E, A, O> {
     pub fn run(self) -> Handle {
         let (player, handle) = self.build();
         player.run();
@@ -77,6 +75,18 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
             self.options,
             self.volume,
         )
+    }
+
+    #[must_use]
+    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A, O> {
+        Builder {
+            decoder,
+            effects: self.effects,
+            audio: self.audio,
+            options: self.options,
+            volume: self.volume,
+            on_end: self.on_end,
+        }
     }
 
     #[must_use]
@@ -119,7 +129,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
     }
 
     #[must_use]
-    pub fn on_end<N: OnEnd<D::Out>>(self, on_end: N) -> Builder<D, E, A, N> {
+    pub fn on_end<N: OnFileEnd>(self, on_end: N) -> Builder<D, E, A, N> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
@@ -130,6 +140,18 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
         }
     }
 
+    /// Set the [`Player`] to run `func` after each song ends.
+    ///
+    /// This is a more specific version of [`Self::on_end`] to aid the compiler with determining
+    /// types
+    #[must_use]
+    pub fn on_end_run<F>(self, func: F) -> Builder<D, E, A, F>
+    where
+        F: Fn(&mut BoxedPlayer) -> PlayerResult<()> + Send + 'static,
+    {
+        self.on_end(func)
+    }
+
     #[must_use]
     pub fn options(self, options: DeviceOptions) -> Self {
         Self { options, ..self }
@@ -138,20 +160,6 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnEnd<D::Out>>
     #[must_use]
     pub fn volume(self, volume: f64) -> Self {
         Self { volume, ..self }
-    }
-}
-
-impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier> Builder<D, E, A, on_end::Default> {
-    #[must_use]
-    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<N, E, A, on_end::Default> {
-        Builder {
-            decoder,
-            effects: self.effects,
-            audio: self.audio,
-            options: self.options,
-            volume: self.volume,
-            on_end: on_end::default(),
-        }
     }
 }
 

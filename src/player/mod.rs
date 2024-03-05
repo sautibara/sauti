@@ -3,7 +3,8 @@
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
-        builder::Builder as PlayerBuilder, on_end, PlayState, Player, PlayerError, PlayerResult,
+        builder::Builder as PlayerBuilder, on_end, on_end::BoxedPlayer, Generic as _, PlayState,
+        Player, PlayerError, PlayerResult,
     };
     pub use crate::audio::DeviceOptions;
     pub use crate::data::prelude::*;
@@ -12,6 +13,7 @@ pub mod prelude {
     pub use std::time::Duration;
 }
 
+use std::convert::Infallible;
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock, Weak};
 use std::thread::JoinHandle;
@@ -29,7 +31,7 @@ use crate::effect::prelude::*;
 use self::audio::PacketPlayer;
 use self::builder::{Builder, DefaultAudio, DefaultDecoder, DefaultEffect};
 use self::decoder::{NoPacket, PlayerDecoder};
-use self::on_end::OnEnd;
+use self::on_end::OnFileEnd;
 
 mod audio;
 pub mod builder;
@@ -50,6 +52,191 @@ enum AudioControl {
     Flush,
     SetState(PlayState),
     SetVolume(f64),
+}
+
+pub trait Generic {
+    type ModifyError: Into<PlayerError>;
+    type GetError: Into<PlayerError>;
+
+    /// Make the player start playing `source`
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - If [resuming](Self::set_state) fails
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError>;
+
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - When [stopping](PlayState::Stopped):
+    ///         - If [pausing the device](Device::pause) fails
+    ///         - If [seeking the stream](AudioStream::seek_to) fails
+    ///     - If the audio [`Device`] has an error
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
+
+    /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
+    ///
+    /// # Errors
+    ///
+    /// - See [`Self::set_state`]
+    fn pause(&mut self) -> Result<(), Self::ModifyError> {
+        self.set_state(PlayState::Paused)
+    }
+
+    /// Change the [`Player`]'s [`PlayState`] to [`Playing`](PlayState::Playing)
+    ///
+    /// # Errors
+    ///
+    /// - See [`Self::set_state`]
+    fn resume(&mut self) -> Result<(), Self::ModifyError> {
+        self.set_state(PlayState::Playing)
+    }
+
+    /// Change the [`Player`]'s [`PlayState`] to [`Stopped`](PlayState::Stopped)
+    ///
+    /// # Errors
+    ///
+    /// - See [`Self::set_state`]
+    fn stop(&mut self) -> Result<(), Self::ModifyError> {
+        self.set_state(PlayState::Stopped)
+    }
+
+    /// Change the [`Player`]'s volume to `volume`
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - If the audio [`Device`] has an error
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn set_volume(&mut self, volume: f64) -> Result<(), Self::ModifyError>;
+
+    /// Seek the underlying [`AudioStream`] to `duration` from the start
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - If the audio [`Device`] has an error
+    ///     - If [`AudioStream::seek_to`] has an error
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn seek_to(&mut self, duration: Duration) -> Result<(), Self::ModifyError>;
+
+    /// Seek the underlying [`AudioStream`] a certain `duration` in `direction` from the current position
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - If the audio [`Device`] has an error
+    ///     - If [`AudioStream::seek_by`] has an error
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn seek_by(
+        &mut self,
+        duration: Duration,
+        direction: Direction,
+    ) -> Result<(), Self::ModifyError>;
+
+    /// Get the current play state of the [`Player`]
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn play_state(&self) -> Result<PlayState, Self::GetError>;
+
+    /// Get the current volume of the [`Player`]
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn volume(&self) -> Result<f64, Self::GetError>;
+
+    /// Get the current [`Duration`] from the start of the playing [`AudioStream`], or [`None`] if
+    /// there is no stream playing
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn position(&self) -> Result<Option<Duration>, Self::GetError>;
+
+    /// Get the length of the current [`AudioStream`], or [`None`] if there is no stream playing
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn duration(&self) -> Result<Option<Duration>, Self::GetError>;
+
+    /// Get the [position](Self::position) and [duration](Self::duration) of the current
+    /// [`AudioStream`] in a tuple, or [`None`] if there is no stream playing.
+    ///
+    /// It is laid out as `(position, duration)`
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError>;
+}
+
+#[allow(clippy::trait_duplication_in_bounds)] // think clippy broke
+impl<T: ?Sized + Generic> Generic for &mut T {
+    type GetError = T::GetError;
+    type ModifyError = T::ModifyError;
+
+    fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError> {
+        (**self).play(source)
+    }
+
+    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+        (**self).set_state(play_state)
+    }
+
+    fn set_volume(&mut self, volume: f64) -> Result<(), Self::ModifyError> {
+        (**self).set_volume(volume)
+    }
+
+    fn seek_to(&mut self, duration: Duration) -> Result<(), Self::ModifyError> {
+        (**self).seek_to(duration)
+    }
+
+    fn seek_by(
+        &mut self,
+        duration: Duration,
+        direction: Direction,
+    ) -> Result<(), Self::ModifyError> {
+        (**self).seek_by(duration, direction)
+    }
+
+    fn play_state(&self) -> Result<PlayState, Self::GetError> {
+        (**self).play_state()
+    }
+
+    fn volume(&self) -> Result<f64, Self::GetError> {
+        (**self).volume()
+    }
+
+    fn position(&self) -> Result<Option<Duration>, Self::GetError> {
+        (**self).position()
+    }
+
+    fn duration(&self) -> Result<Option<Duration>, Self::GetError> {
+        (**self).duration()
+    }
+
+    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
+        (**self).times()
+    }
 }
 
 struct Shared {
@@ -78,7 +265,7 @@ impl Shared {
 
 #[derive(Clone)]
 #[must_use = "Player doesn't do anything unless it's run"]
-pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnEnd<D>> {
+pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> {
     handle: Receiver<Message>,
     decoder: D,
     effects: E,
@@ -98,7 +285,7 @@ impl
     }
 }
 
-impl<D: Decoder, E: Effect, A: Audio, O: OnEnd<D>> Player<D, E, A, O> {
+impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
     fn new(
         decoder: D,
         effects: E,
@@ -182,7 +369,7 @@ macro_rules! recv_or_break {
 }
 
 #[allow(clippy::struct_field_names)] // "play state" is its own thing
-pub struct Inner<'a, D: Decoder, O: OnEnd<D>> {
+struct Inner<'a, D: Decoder, O: OnFileEnd> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
@@ -192,7 +379,7 @@ pub struct Inner<'a, D: Decoder, O: OnEnd<D>> {
     on_end: &'a O,
 }
 
-impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
+impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
     fn run_blocking(&mut self) -> PlayerResult<()> {
         while self.tick()?.is_continue() {}
 
@@ -205,22 +392,30 @@ impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
 
         if self.play_state.is_playing() {
             match self.decoder.send_next_packet()? {
-                Err(reason) => self.no_packet(&reason),
+                // no reason to block; it already blocked due to packet being sent
                 Ok(()) => Ok(ControlFlow::Continue(())),
+                Err(reason) => self.no_packet_available(&reason),
             }
         } else {
-            Ok(ControlFlow::Continue(()))
+            self.block_until_message()
         }
     }
 
-    fn no_packet(&mut self, reason: &NoPacket) -> PlayerResult<ControlFlow<()>> {
+    fn no_packet_available(&mut self, reason: &NoPacket) -> PlayerResult<ControlFlow<()>> {
         // if the stream just ended, then run on_end
         if reason.is_stream_ended() {
-            self.on_end.on_end(self)?;
+            self.on_end.file_ended(&mut {
+                let obj: on_end::BoxedPlayer = Box::new(&mut *self);
+                obj
+            })?;
         }
 
         // no packet was sent, so we must block on a message
         // so that there isn't an infinite loop
+        self.block_until_message()
+    }
+
+    fn block_until_message(&mut self) -> PlayerResult<ControlFlow<()>> {
         recv_or_break!(self.handle.recv() => |message| self.handle(message));
         Ok(ControlFlow::Continue(()))
     }
@@ -235,10 +430,18 @@ impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
         }
     }
 
-    /// # Errors
-    ///
-    /// - If [resuming](Self::set_state) fails
-    pub fn play(&mut self, source: &MediaSource) -> PlayerResult<()> {
+    fn send_control(&self, message: AudioControl) -> PlayerResult<()> {
+        self.audio_control
+            .send(message)
+            .map_err(|_| PlayerError::AudioDisconnected)
+    }
+}
+
+impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
+    type ModifyError = PlayerError;
+    type GetError = Infallible;
+
+    fn play(&mut self, source: &MediaSource) -> PlayerResult<()> {
         // make sure it's playing
         self.set_state(PlayState::Playing)?;
         // flush the packets from the previous song
@@ -255,13 +458,7 @@ impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// - When [stopping](PlayState::Stopped):
-    ///     - If [pausing the device](Device::pause) fails
-    ///     - If [seeking the stream](AudioStream::seek_to) fails
-    /// - If the audio [`Device`] has an error
-    pub fn set_state(&mut self, new: PlayState) -> PlayerResult<()> {
+    fn set_state(&mut self, new: PlayState) -> PlayerResult<()> {
         if self.play_state == new {
             return Ok(());
         }
@@ -287,61 +484,57 @@ impl<'a, D: Decoder, O: OnEnd<D>> Inner<'a, D, O> {
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// - If the audio [`Device`] has an error
-    pub fn set_volume(&mut self, new: f64) -> PlayerResult<()> {
+    fn set_volume(&mut self, new: f64) -> PlayerResult<()> {
         self.send_control(AudioControl::SetVolume(new))?;
         self.shared.volume.store(new);
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// - If the audio [`Device`] has an error
-    /// - If [`AudioStream::seek_to`] has an error
-    pub fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
+    fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_to(duration))?;
         self.send_control(AudioControl::Flush)?;
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// - If the audio [`Device`] has an error
-    /// - If [`AudioStream::seek_by`] has an error
-    pub fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
+    fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_by(duration, direction))?;
         self.send_control(AudioControl::Flush)?;
         Ok(())
     }
 
-    #[must_use]
-    pub const fn play_state(&self) -> PlayState {
-        self.play_state
+    fn play_state(&self) -> Result<PlayState, Self::GetError> {
+        Ok(self.play_state)
     }
 
-    #[must_use]
-    pub fn volume(&self) -> f64 {
-        self.shared.volume.load()
+    fn volume(&self) -> Result<f64, Self::GetError> {
+        Ok(self.shared.volume.load())
     }
 
-    #[must_use]
-    pub fn position(&self) -> Option<Duration> {
-        self.decoder.stream().map(AudioStream::position)
+    fn position(&self) -> Result<Option<Duration>, Self::GetError> {
+        Ok(self.decoder.stream().map(AudioStream::position))
     }
 
-    #[must_use]
-    pub fn duration(&self) -> Option<Duration> {
-        self.decoder.stream().map(AudioStream::duration)
+    fn duration(&self) -> Result<Option<Duration>, Self::GetError> {
+        Ok(self.decoder.stream().map(AudioStream::duration))
     }
 
-    fn send_control(&self, message: AudioControl) -> PlayerResult<()> {
-        self.audio_control
-            .send(message)
-            .map_err(|_| PlayerError::AudioDisconnected)
+    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
+        Ok(self
+            .decoder
+            .stream()
+            .map(|stream| (stream.position(), stream.duration())))
+    }
+}
+
+impl<'a, D: Decoder, O: OnFileEnd> Drop for Inner<'a, D, O> {
+    fn drop(&mut self) {
+        // Stop the audio before dropping, since the sound source expects the audio_control sender
+        // to never be disconnected. By stopping it, the sound source never looks at the sender.
+        let _ = self
+            .audio_control
+            .send(AudioControl::SetState(PlayState::Stopped));
     }
 }
 
@@ -388,6 +581,18 @@ pub struct Handle {
 #[derive(Error, Debug)]
 #[error("player was disconnected")]
 pub struct Disconnected;
+
+impl From<Disconnected> for PlayerError {
+    fn from(_: Disconnected) -> Self {
+        Self::Disconnected
+    }
+}
+
+impl From<Infallible> for PlayerError {
+    fn from(_: Infallible) -> Self {
+        unreachable!("Infallible cannot be constructed")
+    }
+}
 
 // error documentation done above
 #[allow(clippy::missing_errors_doc)]
@@ -444,16 +649,6 @@ impl Handle {
         self.send(Message::SeekBy(duration, direction))
     }
 
-    /// Get the current play state of the [`Player`]
-    pub fn play_state(&self) -> Result<PlayState, Disconnected> {
-        self.get(|shared| shared.play_state.load())
-    }
-
-    /// Get the current volume of the [`Player`]
-    pub fn volume(&self) -> Result<f64, Disconnected> {
-        self.get(|shared| shared.volume.load())
-    }
-
     /// Read the shared [`StreamTimes`], mapping it using `func` if it exists or returning [`None`] otherwise
     fn map_times<T>(
         &self,
@@ -466,25 +661,6 @@ impl Handle {
         })?
     }
 
-    /// Get the current [`Duration`] from the start of the playing [`AudioStream`], or [`None`] if
-    /// there is no stream playing
-    pub fn position(&self) -> Result<Option<Duration>, Disconnected> {
-        self.map_times(|times| times.position())
-    }
-
-    /// Get the length of the current [`AudioStream`], or [`None`] if there is no stream playing
-    pub fn duration(&self) -> Result<Option<Duration>, Disconnected> {
-        self.map_times(|times| times.duration())
-    }
-
-    /// Get the [position](Self::position) and [duration](Self::duration) of the current
-    /// [`AudioStream`] in a tuple, or [`None`] if there is no stream playing.
-    ///
-    /// It is laid out as `(position, duration)`
-    pub fn times(&self) -> Result<Option<(Duration, Duration)>, Disconnected> {
-        self.map_times(|times| (times.position(), times.duration()))
-    }
-
     /// Returns `true` if the [`Player`] has disconnected
     #[must_use]
     pub fn disconnected(&self) -> bool {
@@ -492,11 +668,56 @@ impl Handle {
     }
 }
 
-// TODO: trait that combines Handler and Inner
-// so that callback can use Inner as a somewhat Handler
-// trait will include Error type
-// Disconnected for Handler and PlayerError for Inner
-// trait will use &Handler and &mut Inner
+impl Generic for Handle {
+    type ModifyError = Disconnected;
+    type GetError = Disconnected;
+
+    fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError> {
+        Self::play(self, source.clone())
+    }
+
+    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+        Self::set_state(self, play_state)
+    }
+
+    fn set_volume(&mut self, volume: f64) -> Result<(), Self::ModifyError> {
+        Self::set_volume(self, volume)
+    }
+
+    fn seek_to(&mut self, duration: Duration) -> Result<(), Self::ModifyError> {
+        Self::seek_to(self, duration)
+    }
+
+    fn seek_by(
+        &mut self,
+        duration: Duration,
+        direction: Direction,
+    ) -> Result<(), Self::ModifyError> {
+        Self::seek_by(self, duration, direction)
+    }
+
+    fn play_state(&self) -> Result<PlayState, Self::GetError> {
+        self.get(|shared| shared.play_state.load())
+    }
+
+    fn volume(&self) -> Result<f64, Self::GetError> {
+        self.get(|shared| shared.volume.load())
+    }
+
+    fn position(&self) -> Result<Option<Duration>, Self::GetError> {
+        self.map_times(|times| times.position())
+    }
+
+    fn duration(&self) -> Result<Option<Duration>, Self::GetError> {
+        self.map_times(|times| times.duration())
+    }
+
+    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
+        self.map_times(|times| (times.position(), times.duration()))
+    }
+}
+
+// TODO: make Handle derive Generic too
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayState {

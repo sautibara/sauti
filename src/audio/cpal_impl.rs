@@ -46,7 +46,7 @@ fn apply_options(
         options
             .sample_rate
             .map_or_else(|| config.sample_rate(), |rate| SampleRate(rate as u32)),
-        config.buffer_size().clone(),
+        *config.buffer_size(),
         options
             .sample_format
             .unwrap_or_else(|| config.sample_format()),
@@ -291,7 +291,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
             }),
             stream,
             device,
-            buffer_size: config.buffer_size().clone(),
+            buffer_size: *config.buffer_size(),
             device_info: config.into(),
             sample_marker: std::marker::PhantomData,
         })
@@ -311,7 +311,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
         SupportedStreamConfig::new(
             self.device_info.channels as u16,
             cpal::SampleRate(self.device_info.sample_rate as u32),
-            self.buffer_size.clone(),
+            self.buffer_size,
             self.device_info.sample_format,
         )
     }
