@@ -1,7 +1,7 @@
-//! Provides a method for running actions after an audio file finishes playing.
+//! Gives the ability to run actions after an audio file finishes playing.
 //!
-//! This could be used to stop the player after the file ends (which is what it is by [`default`]) or to
-//! queue another file.
+//! The default behavior is to [stop](Generic::stop) the player after a song ends. This can be
+//! overridden if necessary, such as if there is a queue of songs.
 //!
 //! # Examples
 //!
@@ -19,7 +19,7 @@
 //! // An [`Empty`] player does nothing with its data
 //! let player = Empty::player()
 //!     // Once the song ends, tell the main thread to exit
-//!     .on_end_run(move |_| {
+//!     .on_file_end_run(move |_| {
 //!         sender.send(Exit).expect("failed to send message");
 //!         Ok(())
 //!     })
@@ -44,20 +44,31 @@ use super::prelude::*;
 use super::Generic;
 use std::convert::Infallible;
 
+/// Get the default [`OnFileEnd`] callback
 #[must_use]
 pub const fn default() -> Default {
     Stop
 }
 
+/// The output type of [`default`]
 pub type Default = Stop;
 
+/// A [`Generic`] player inside a trait object
 pub type BoxedPlayer<'a> = Box<dyn Generic<ModifyError = PlayerError, GetError = Infallible> + 'a>;
 
+/// A callback for when a file ends in a [`Player`]
+///
+/// [`Fn(&mut BoxedPlayer) -> PlayerResult<()>`](Fn) is a notable implementor of this.
 pub trait OnFileEnd: Send + 'static {
+    /// A callback for when a file ends in the player. `player` can be used to control the player.
+    ///
+    /// The default behavior is to stop, so it's often advised to call [`Generic::stop`] in this.
+    ///
+    /// Errors passed up in the return value are delegated to the player to handle.
+    ///
     /// # Errors
     ///
     /// - Any errors that are encountered when interacting with the player
-    /// - Note: Errors are passed up to the player for it to handle
     fn file_ended(&self, player: &mut BoxedPlayer) -> PlayerResult<()>;
 }
 
@@ -70,6 +81,7 @@ where
     }
 }
 
+/// [Stop](Generic::stop) the [`Player`] after a song ends
 pub struct Stop;
 
 impl OnFileEnd for Stop {

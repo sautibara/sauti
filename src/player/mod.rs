@@ -1,4 +1,58 @@
 //! A single-track audio player
+//!
+//! To create a player, use [`Player::builder`] to obtain a [`Builder`]. Set the options that are
+//! needed, then call [`Builder::run`] or [`Builder::build`] then [`Player::run`]. After, use the
+//! [`Handle`] to interact with the underlying [`Player`].
+//!
+//! Much of the important functionality is in the options of the player, which can be looked more
+//! into depth in the [`builder`] documentation. [`Handle`]s are also a good resource.
+//!
+//! # Examples
+//!
+//! ## Usage
+//!
+//! ```
+//! # fn main() -> Result<(), sauti::player::Disconnected> {
+//! use sauti::player::prelude::*;
+//!
+//! // [`Builder`] can be used to create a [`Player`] term by term
+//! let handle = Player::builder().volume(0.5).run();
+//!
+//! // A [`Handle`] can be used to play, pause, and resume a file
+//! handle.play("../test/test_file.flac")?;
+//! handle.pause()?;
+//! handle.resume()?;
+//!
+//! // It can also query for information from the file
+//! let _ = handle.play_state()?;
+//! let _ = handle.duration()?;
+//! # Ok(()) }
+//! ```
+//!
+//! ## Cli Player
+//!
+//! ```no_run
+//! # fn main() -> Result<(), sauti::player::Disconnected> {
+//! use sauti::player::prelude::*;
+//!
+//! // [`Builder`] can be used to create a [`Player`] term by term
+//! let handle = Player::builder().volume(0.5).run();
+//!
+//! // Get the file from executable arugments
+//! let Some(path) = std::env::args().nth(1) else {
+//!     println!("usage: {{command}} {{path}}");
+//!     return Ok(());
+//! };
+//!
+//! // Start playing the file
+//! handle.play(path)?;
+//!
+//! // Wait for user input to exit
+//! std::io::stdin()
+//!     .read_line(&mut String::new())
+//!     .expect("failed to read stdin");
+//! # Ok(()) }
+//! ```
 
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
@@ -54,6 +108,9 @@ enum AudioControl {
     SetVolume(f64),
 }
 
+/// A generic form of a reference to a [`Player`]
+///
+/// [`Handle`] is a notable implementor of this, and [`OnFileEnd`] gives this as a parameter.
 pub trait Generic {
     type ModifyError: Into<PlayerError>;
     type GetError: Into<PlayerError>;
@@ -148,16 +205,14 @@ pub trait Generic {
     ///
     /// # Errors
     ///
-    /// - [`Handle`]
-    ///     - If the player disconnected
+    /// - [`Handle`]: If the player disconnected
     fn play_state(&self) -> Result<PlayState, Self::GetError>;
 
     /// Get the current volume of the [`Player`]
     ///
     /// # Errors
     ///
-    /// - [`Handle`]
-    ///     - If the player disconnected
+    /// - [`Handle`]: If the player disconnected
     fn volume(&self) -> Result<f64, Self::GetError>;
 
     /// Get the current [`Duration`] from the start of the playing [`AudioStream`], or [`None`] if
@@ -165,16 +220,14 @@ pub trait Generic {
     ///
     /// # Errors
     ///
-    /// - [`Handle`]
-    ///     - If the player disconnected
+    /// - [`Handle`]: If the player disconnected
     fn position(&self) -> Result<Option<Duration>, Self::GetError>;
 
     /// Get the length of the current [`AudioStream`], or [`None`] if there is no stream playing
     ///
     /// # Errors
     ///
-    /// - [`Handle`]
-    ///     - If the player disconnected
+    /// - [`Handle`]: If the player disconnected
     fn duration(&self) -> Result<Option<Duration>, Self::GetError>;
 
     /// Get the [position](Self::position) and [duration](Self::duration) of the current
@@ -184,12 +237,10 @@ pub trait Generic {
     ///
     /// # Errors
     ///
-    /// - [`Handle`]
-    ///     - If the player disconnected
+    /// - [`Handle`]: If the player disconnected
     fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError>;
 }
 
-#[allow(clippy::trait_duplication_in_bounds)] // think clippy broke
 impl<T: ?Sized + Generic> Generic for &mut T {
     type GetError = T::GetError;
     type ModifyError = T::ModifyError;
@@ -263,7 +314,15 @@ impl Shared {
     }
 }
 
-#[derive(Clone)]
+/// A single-track sound file player
+///
+/// The player routes sound packets obtained through the [`Decoder`] to the output [`Audio`],
+/// applying an [`Effect`] if given. The player may also run a custom callback for when a file ends
+/// through [`OnFileEnd`].
+///
+/// To obtain a [`Player`], see [`Builder`].
+///
+/// The player automatically exits when every [`Handle`] goes out of scope
 #[must_use = "Player doesn't do anything unless it's run"]
 pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> {
     handle: Receiver<Message>,
@@ -278,9 +337,9 @@ pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> {
 impl
     Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default, on_end::Default>
 {
+    /// Construct a [`Builder`] filled with defaults.
     #[must_use]
-    pub fn default_builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default>
-    {
+    pub fn builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default> {
         Builder::default()
     }
 }
@@ -314,6 +373,8 @@ impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
         )
     }
 
+    /// Run the player in another thread, returning a [`JoinHandle`] for that thread
+    ///
     /// # Errors
     ///
     /// - If there was an issue starting audio output
@@ -326,6 +387,8 @@ impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
         })
     }
 
+    /// Run the player in this thread, blocking until the player exits
+    ///
     /// # Errors
     ///
     /// - If there was an issue starting audio output
@@ -394,6 +457,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
             match self.decoder.send_next_packet()? {
                 // no reason to block; it already blocked due to packet being sent
                 Ok(()) => Ok(ControlFlow::Continue(())),
+                // there wasn't a packet available, handle the reason
                 Err(reason) => self.no_packet_available(&reason),
             }
         } else {
@@ -405,6 +469,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
         // if the stream just ended, then run on_end
         if reason.is_stream_ended() {
             self.on_end.file_ended(&mut {
+                // this dance is necessary so that rust knows to make a trait object here
                 let obj: on_end::BoxedPlayer = Box::new(&mut *self);
                 obj
             })?;
@@ -540,6 +605,9 @@ impl<'a, D: Decoder, O: OnFileEnd> Drop for Inner<'a, D, O> {
 
 /// A handle to a [`Player`] that could control it or query its info
 ///
+/// This implements [`Generic`], which is how info is queried, but it also provides methods for
+/// controlling the player with an immutable reference (which is achieved using a channel).
+///
 /// # Errors
 ///
 /// If the player disconnects, then all methods will return [`Err(Disconnected)`](Disconnected)
@@ -556,7 +624,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Drop for Inner<'a, D, O> {
 /// // create a new player that ignores audio
 /// let handle = Empty::player().run();
 ///
-/// // start playing an imaginary file
+/// // the handle can be used to control the player, so start playing an imaginary file
 /// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
 /// handle.play("")?;
 /// // it may take a bit for the player to recieve the message
@@ -564,9 +632,10 @@ impl<'a, D: Decoder, O: OnFileEnd> Drop for Inner<'a, D, O> {
 /// // once the player starts playing, it changes to [`PlayState::Playing`]
 /// assert_eq!(handle.play_state()?, PlayState::Playing);
 ///
-/// // the handle can also pause
+/// // the handle can also pause and resume the player
 /// handle.pause()?;
 /// sleep(Duration::from_millis(100));
+/// // and the play state changes as a result
 /// assert_eq!(handle.play_state()?, PlayState::Paused);
 /// # Ok(()) }
 /// ```
@@ -577,7 +646,7 @@ pub struct Handle {
     shared: Weak<Shared>,
 }
 
-/// A [`Handle`] could not connect to its respective [`Player`]
+/// An error representing that a [`Handle`] could not connect to its respective [`Player`]
 #[derive(Error, Debug)]
 #[error("player was disconnected")]
 pub struct Disconnected;
@@ -717,12 +786,16 @@ impl Generic for Handle {
     }
 }
 
-// TODO: make Handle derive Generic too
-
+/// The current state of playing audio in a [`Player`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayState {
+    /// Audio is playing; packets are being decoded and sent to an audio device
     Playing,
+    /// Audio is not playing, but the position of the player is still intact and the audio device
+    /// is alive
     Paused,
+    /// audio is not playing, the position of the player is reset to the beginning, and the audio
+    /// device is sleeping (if possible)
     Stopped,
 }
 
@@ -758,16 +831,21 @@ impl Default for PlayState {
     }
 }
 
+/// Any error that can be occurred while the player is running
 #[derive(Debug, Error)]
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub enum PlayerError {
+    /// The player encountered an error when outputting audio
     #[error("while playing audio: {0}")]
     Audio(AudioError),
+    /// The player encountered an error when decoding a file
     #[error("while decoding file: {0}")]
     Decoder(DecoderError),
+    /// The audio thread disconnected before it should have
     #[error("audio player disconnected")]
     AudioDisconnected,
+    /// The player has disconnected
     #[error("player disconnected")]
     Disconnected,
 }
@@ -784,6 +862,7 @@ impl From<AudioError> for PlayerError {
     }
 }
 
+/// A result of an operation on a [`Player`]
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type PlayerResult<T> = Result<T, PlayerError>;

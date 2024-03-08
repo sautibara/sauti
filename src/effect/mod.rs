@@ -1,5 +1,8 @@
 //! Audio effects that can be applied on a [`SoundPacket`]
 //!
+//! To apply an effect, push a [`SoundPacket`] through [`Effect::apply_to`] or a [`GenericPacket`]
+//! through [`Generic::apply_to_generic`], which is implemented for all effects.
+//!
 //! Effects are given each sound packet and the [`StreamSpec`] of the output stream and return a
 //! new, modified effect.
 //!
@@ -147,7 +150,9 @@ impl Effect for None {
     }
 }
 
+/// A generic [`Effect`], able to be made into a trait object
 pub trait Generic {
+    /// A generic version of [`Effect::apply_to`]
     fn apply_to_generic(&mut self, input: GenericPacket, output_spec: &StreamSpec)
         -> GenericPacket;
 }

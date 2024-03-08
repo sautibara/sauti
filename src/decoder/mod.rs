@@ -95,8 +95,6 @@ pub trait Decoder: Send + 'static {
     }
 }
 
-// TODO: move the burden of providing a Sync obtainer for position and duration to the AudioStream
-
 /// A decoded stream of audio
 ///
 /// The next packet of the stream can be obtained using [`Self::next_packet`],

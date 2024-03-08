@@ -57,6 +57,7 @@ use std::ops::Deref;
 use thiserror::Error;
 
 mod cpal_impl;
+pub use cpal_impl::Cpal;
 
 /// Useful types for interacting with audio
 pub mod prelude {
@@ -72,7 +73,7 @@ use crate::data::{ConvertibleSample, SampleFormat};
 /// Find the default [`Audio`] handler
 #[must_use]
 pub const fn default() -> Default {
-    cpal_impl::Cpal
+    Cpal
 }
 
 pub type Default = cpal_impl::Cpal;

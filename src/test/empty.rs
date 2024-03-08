@@ -32,11 +32,11 @@ impl Empty {
     /// ```
     #[must_use]
     pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self> {
-        Player::default_builder()
+        Player::builder()
             .decoder(Self)
             .audio(Self)
             .effects(Self)
-            .on_end(Self)
+            .on_file_end(Self)
     }
 
     fn drain_source<S: SoundSource>(source: &S, info: DeviceInfo) {

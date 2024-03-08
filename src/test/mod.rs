@@ -15,7 +15,7 @@
 //! let provider = Provider::provide(generic.clone());
 //!
 //! // Create a [`Player`] using the [`Collector`] and [`Provider`]
-//! let player = Player::default_builder()
+//! let player = Player::builder()
 //!     .decoder(provider)
 //!     .audio(collector)
 //!     // The SampleFormat has to be I32 because that's what's used above

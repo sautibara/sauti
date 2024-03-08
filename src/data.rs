@@ -2,7 +2,6 @@
 use std::fmt::{Debug, Display};
 use std::iter::once;
 use std::path::{Path, PathBuf};
-// TODO: example
 use std::{cmp::Ordering, convert::identity, ops::Range};
 
 use crate::audio::DeviceInfo;
