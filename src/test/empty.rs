@@ -1,9 +1,9 @@
 use std::thread;
 use std::time::Duration;
 
-use crate::audio::prelude::*;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
+use crate::output::prelude::*;
 use crate::player::on_file_end::OnFileEnd;
 use crate::player::prelude::*;
 
@@ -34,7 +34,7 @@ impl Empty {
     pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self> {
         Player::builder()
             .decoder(Self)
-            .audio(Self)
+            .output(Self)
             .effects(Self)
             .on_file_end(Self)
     }
@@ -54,12 +54,12 @@ impl Empty {
     }
 }
 
-impl Audio for Empty {
+impl Output for Empty {
     fn start<S: SoundSource>(
         &self,
         options: impl Into<DeviceOptions>,
         source: S,
-    ) -> AudioResult<Box<dyn Device>> {
+    ) -> OutputResult<Box<dyn Device>> {
         let info = DeviceInfo::default().apply(&options.into());
         // the source must be run in some way,
         // so just ignore everything it says
@@ -77,22 +77,22 @@ impl Device for EmptyDevice {
         &self.info
     }
 
-    fn pause(&mut self) -> AudioResult<()> {
+    fn pause(&mut self) -> OutputResult<()> {
         Ok(())
     }
 
-    fn resume(&mut self) -> AudioResult<()> {
+    fn resume(&mut self) -> OutputResult<()> {
         Ok(())
     }
 
-    fn restart(&mut self) -> AudioResult<()> {
+    fn restart(&mut self) -> OutputResult<()> {
         Ok(())
     }
 
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
-    ) -> AudioResult<Option<Box<dyn Device>>> {
+    ) -> OutputResult<Option<Box<dyn Device>>> {
         self.info = self.info.apply(&options);
         Ok(None)
     }

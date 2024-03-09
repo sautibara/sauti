@@ -17,7 +17,7 @@
 //! // Create a [`Player`] using the [`Collector`] and [`Provider`]
 //! let player = Player::builder()
 //!     .decoder(provider)
-//!     .audio(collector)
+//!     .output(collector)
 //!     // The SampleFormat has to be I32 because that's what's used above
 //!     .options(DeviceOptions::default().with_sample_format(SampleFormat::I32))
 //!     .run();

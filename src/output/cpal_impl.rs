@@ -74,7 +74,7 @@ struct SupportedConfig {
 }
 
 impl SupportedConfig {
-    fn from_device(device: &cpal::Device) -> AudioResult<Self> {
+    fn from_device(device: &cpal::Device) -> OutputResult<Self> {
         Ok(Self {
             ranges: device
                 .supported_output_configs()
@@ -121,12 +121,12 @@ impl SupportedConfig {
 pub struct Cpal;
 
 impl Cpal {
-    fn find_device(host: &cpal::Host) -> AudioResult<cpal::Device> {
+    fn find_device(host: &cpal::Host) -> OutputResult<cpal::Device> {
         host.default_output_device()
-            .ok_or(AudioError::NoDevicesFound)
+            .ok_or(OutputError::NoDevicesFound)
     }
 
-    fn default_config(device: &cpal::Device) -> AudioResult<cpal::SupportedStreamConfig> {
+    fn default_config(device: &cpal::Device) -> OutputResult<cpal::SupportedStreamConfig> {
         device
             .default_output_config()
             .map_err(|err| default_stream_config_error(err, device))
@@ -135,7 +135,7 @@ impl Cpal {
     fn find_config(
         device: &cpal::Device,
         options: &DeviceOptions,
-    ) -> AudioResult<cpal::SupportedStreamConfig> {
+    ) -> OutputResult<cpal::SupportedStreamConfig> {
         // get the default config for the options to reference
         let default = Self::default_config(device)?;
 
@@ -148,7 +148,7 @@ impl Cpal {
 
         // if there are no options, then return an error
         let Some(val) = val else {
-            return Err(AudioError::DeviceOptionsNotSupported {
+            return Err(OutputError::DeviceOptionsNotSupported {
                 options: options.clone(),
                 device: device.name()?,
             });
@@ -162,7 +162,7 @@ impl Cpal {
         device: &cpal::Device,
         options: &DeviceOptions,
         default: &cpal::SupportedStreamConfig,
-    ) -> AudioResult<Option<cpal::SupportedStreamConfig>> {
+    ) -> OutputResult<Option<cpal::SupportedStreamConfig>> {
         // if there are no options, then just use the default
         if options.is_empty() {
             return Ok(Some(default.clone()));
@@ -187,7 +187,7 @@ impl Cpal {
         device: &cpal::Device,
         config: &cpal::SupportedStreamConfig,
         source: &B,
-    ) -> AudioResult<cpal::Stream> {
+    ) -> OutputResult<cpal::Stream> {
         let device_info = DeviceInfo {
             sample_rate: config.sample_rate().0 as usize,
             sample_format: config.sample_format(),
@@ -222,12 +222,12 @@ impl Cpal {
     }
 }
 
-impl Audio for Cpal {
+impl Output for Cpal {
     fn start<B: SoundSource>(
         &self,
         options: impl Into<DeviceOptions>,
         source: B,
-    ) -> AudioResult<Box<dyn Device>> {
+    ) -> OutputResult<Box<dyn Device>> {
         let options = options.into();
         let host = cpal::default_host();
         let device = Self::find_device(&host)?;
@@ -244,7 +244,7 @@ impl Audio for Cpal {
             SampleFormat::U64 => CpalDevice::<u64, B>::new_boxed(device, options, config, source),
             SampleFormat::F32 => CpalDevice::<f32, B>::new_boxed(device, options, config, source),
             SampleFormat::F64 => CpalDevice::<f64, B>::new_boxed(device, options, config, source),
-            format => Err(AudioError::UnrecognizedSampleFormat(format)),
+            format => Err(OutputError::UnrecognizedSampleFormat(format)),
         }
     }
 }
@@ -277,7 +277,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
         device_options: DeviceOptions,
         config: cpal::SupportedStreamConfig,
         source: B,
-    ) -> AudioResult<Self> {
+    ) -> OutputResult<Self> {
         let stream = Cpal::create_stream::<S, B>(&device, &config, &source)?;
 
         // the stream sometimes starts off paused, so resume it
@@ -303,7 +303,7 @@ impl<S: ConvertibleSample, B: SoundSource> CpalDevice<S, B> {
         device_options: DeviceOptions,
         config: cpal::SupportedStreamConfig,
         source: B,
-    ) -> AudioResult<Box<dyn Device>> {
+    ) -> OutputResult<Box<dyn Device>> {
         // map doesn't work for some reason
         Ok(Box::new(Self::new(device, device_options, config, source)?))
     }
@@ -322,7 +322,7 @@ const DNA_ERROR: &str =
     "device skeletons that are modified and used to create a new device should not be able to be used to create another device";
 
 impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
-    fn restart(&mut self) -> AudioResult<()> {
+    fn restart(&mut self) -> OutputResult<()> {
         let dna = self.dna.as_ref().expect(DNA_ERROR);
         let stream = Cpal::create_stream::<S, B>(&self.device, &self.stream_config(), &dna.source)?;
         self.stream = stream; // old stream drops and disconnects
@@ -331,7 +331,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         self.resume()
     }
 
-    fn pause(&mut self) -> AudioResult<()> {
+    fn pause(&mut self) -> OutputResult<()> {
         // FIXME: currently, cpal doesn't clear out the audio buffer when pausing, so some audio
         // plays after the stream resumes after a stop. (see https://github.com/RustAudio/cpal/issues/807)
         // because of this, the pausing functionality is just removed.
@@ -342,7 +342,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
         Ok(())
     }
 
-    fn resume(&mut self) -> AudioResult<()> {
+    fn resume(&mut self) -> OutputResult<()> {
         // self.stream
         //     .play()
         //     .map_err(|err| play_stream_error(err, &self.device))
@@ -356,7 +356,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
-    ) -> AudioResult<Option<Box<dyn Device>>> {
+    ) -> OutputResult<Option<Box<dyn Device>>> {
         let mut dna = self.dna.take().expect(DNA_ERROR);
         let supported_config = SupportedConfig::from_device(&self.device)?;
 
@@ -369,7 +369,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device for CpalDevice<S, B> {
 
         // if there are none, then return an error
         let Some(new_options) = new_options else {
-            return Err(AudioError::DeviceOptionsNotSupported {
+            return Err(OutputError::DeviceOptionsNotSupported {
                 options: dna.device_options.merge(options),
                 device: self.device.name()?,
             });
@@ -417,55 +417,57 @@ impl From<SupportedStreamConfig> for DeviceInfo {
 fn default_stream_config_error(
     err: cpal::DefaultStreamConfigError,
     device: &cpal::Device,
-) -> AudioError {
+) -> OutputError {
     let name = match device.name() {
         Ok(name) => name,
         Err(err) => return err.into(),
     };
 
     match err {
-        cpal::DefaultStreamConfigError::DeviceNotAvailable => AudioError::DeviceNotAvailable(name),
+        cpal::DefaultStreamConfigError::DeviceNotAvailable => OutputError::DeviceNotAvailable(name),
         // This happens when a device doesn't support the stream type (input or output)
         // requested. Since only outputs are requested, it can be mapped to output
-        cpal::DefaultStreamConfigError::StreamTypeNotSupported => AudioError::DeviceNoOutput(name),
-        cpal::DefaultStreamConfigError::BackendSpecific { err } => AudioError::DeviceBackendError {
-            device: name,
-            error: err.description,
-        },
+        cpal::DefaultStreamConfigError::StreamTypeNotSupported => OutputError::DeviceNoOutput(name),
+        cpal::DefaultStreamConfigError::BackendSpecific { err } => {
+            OutputError::DeviceBackendError {
+                device: name,
+                error: err.description,
+            }
+        }
     }
 }
 
-fn build_stream_error(err: cpal::BuildStreamError, device: &cpal::Device) -> AudioError {
+fn build_stream_error(err: cpal::BuildStreamError, device: &cpal::Device) -> OutputError {
     let name = match device.name() {
         Ok(name) => name,
         Err(err) => return err.into(),
     };
 
     match err {
-        cpal::BuildStreamError::DeviceNotAvailable => AudioError::DeviceNotAvailable(name),
+        cpal::BuildStreamError::DeviceNotAvailable => OutputError::DeviceNotAvailable(name),
         cpal::BuildStreamError::StreamConfigNotSupported => unreachable!("must be caught earlier"),
-        cpal::BuildStreamError::InvalidArgument => AudioError::BackendError("cpal passed an invalid argument somewhere (see cpal::BuildStreamError::InvalidArgument)".to_string()),
-        cpal::BuildStreamError::StreamIdOverflow => AudioError::BackendError("cpal - too many stream ids, overflow (see cpal::BuildStreamError::StreamIdOverflow)".to_string()),
-        cpal::BuildStreamError::BackendSpecific { err } => AudioError::DeviceBackendError { device: name, error: err.description },
+        cpal::BuildStreamError::InvalidArgument => OutputError::BackendError("cpal passed an invalid argument somewhere (see cpal::BuildStreamError::InvalidArgument)".to_string()),
+        cpal::BuildStreamError::StreamIdOverflow => OutputError::BackendError("cpal - too many stream ids, overflow (see cpal::BuildStreamError::StreamIdOverflow)".to_string()),
+        cpal::BuildStreamError::BackendSpecific { err } => OutputError::DeviceBackendError { device: name, error: err.description },
     }
 }
 
-impl From<cpal::DeviceNameError> for AudioError {
+impl From<cpal::DeviceNameError> for OutputError {
     fn from(value: cpal::DeviceNameError) -> Self {
         let cpal::DeviceNameError::BackendSpecific { err } = value;
         Self::BackendError(err.description)
     }
 }
 
-fn play_stream_error(err: cpal::PlayStreamError, device: &cpal::Device) -> AudioError {
+fn play_stream_error(err: cpal::PlayStreamError, device: &cpal::Device) -> OutputError {
     let name = match device.name() {
         Ok(name) => name,
         Err(err) => return err.into(),
     };
 
     match err {
-        cpal::PlayStreamError::DeviceNotAvailable => AudioError::DeviceNotAvailable(name),
-        cpal::PlayStreamError::BackendSpecific { err } => AudioError::DeviceBackendError {
+        cpal::PlayStreamError::DeviceNotAvailable => OutputError::DeviceNotAvailable(name),
+        cpal::PlayStreamError::BackendSpecific { err } => OutputError::DeviceBackendError {
             device: name,
             error: err.description,
         },
@@ -473,15 +475,15 @@ fn play_stream_error(err: cpal::PlayStreamError, device: &cpal::Device) -> Audio
 }
 
 #[allow(dead_code)] // for if cpal fixes bug #807
-fn pause_stream_error(err: cpal::PauseStreamError, device: &cpal::Device) -> AudioError {
+fn pause_stream_error(err: cpal::PauseStreamError, device: &cpal::Device) -> OutputError {
     let name = match device.name() {
         Ok(name) => name,
         Err(err) => return err.into(),
     };
 
     match err {
-        cpal::PauseStreamError::DeviceNotAvailable => AudioError::DeviceNotAvailable(name),
-        cpal::PauseStreamError::BackendSpecific { err } => AudioError::DeviceBackendError {
+        cpal::PauseStreamError::DeviceNotAvailable => OutputError::DeviceNotAvailable(name),
+        cpal::PauseStreamError::BackendSpecific { err } => OutputError::DeviceBackendError {
             device: name,
             error: err.description,
         },
@@ -491,15 +493,15 @@ fn pause_stream_error(err: cpal::PauseStreamError, device: &cpal::Device) -> Aud
 fn supported_configs_error(
     err: cpal::SupportedStreamConfigsError,
     device: &cpal::Device,
-) -> AudioError {
+) -> OutputError {
     let name = match device.name() {
         Ok(name) => name,
         Err(err) => return err.into(),
     };
 
     match err {
-        cpal::SupportedStreamConfigsError::DeviceNotAvailable => AudioError::DeviceNotAvailable(name),
-        cpal::SupportedStreamConfigsError::InvalidArgument => AudioError::BackendError("cpal passed an invalid argument somewhere (see cpal::BuildStreamError::InvalidArgument)".to_string()),
-        cpal::SupportedStreamConfigsError::BackendSpecific { err } => AudioError::DeviceBackendError { device: name, error: err.description },
+        cpal::SupportedStreamConfigsError::DeviceNotAvailable => OutputError::DeviceNotAvailable(name),
+        cpal::SupportedStreamConfigsError::InvalidArgument => OutputError::BackendError("cpal passed an invalid argument somewhere (see cpal::BuildStreamError::InvalidArgument)".to_string()),
+        cpal::SupportedStreamConfigsError::BackendSpecific { err } => OutputError::DeviceBackendError { device: name, error: err.description },
     }
 }

@@ -60,10 +60,10 @@ pub mod prelude {
         builder::Builder as PlayerBuilder, on_file_end, on_file_end::BoxedPlayer, Generic as _,
         Handle as PlayerHandle, PlayState, Player, PlayerError, PlayerResult,
     };
-    pub use crate::audio::DeviceOptions;
     pub use crate::data::prelude::*;
     pub use crate::decoder::Direction;
     pub use crate::effect::prelude::*;
+    pub use crate::output::DeviceOptions;
     pub use std::time::Duration;
 }
 
@@ -78,19 +78,19 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
 
-use crate::audio::prelude::*;
 use crate::decoder::{prelude::*, Direction};
 use crate::effect::prelude::*;
+use crate::output::prelude::*;
 
-use self::audio::PacketPlayer;
-use self::builder::{Builder, DefaultAudio, DefaultDecoder, DefaultEffect};
+use self::builder::{Builder, DefaultDecoder, DefaultEffect, DefaultOutput};
 use self::decoder::{NoPacket, PlayerDecoder};
 use self::on_file_end::OnFileEnd;
+use self::output::PacketPlayer;
 
-mod audio;
 pub mod builder;
 mod decoder;
 pub mod on_file_end;
+mod output;
 
 #[derive(Debug)]
 enum Message {
@@ -102,7 +102,7 @@ enum Message {
 }
 
 #[derive(Debug)]
-enum AudioControl {
+enum OutputControl {
     Flush,
     SetState(PlayState),
     SetVolume(f64),
@@ -133,7 +133,7 @@ pub trait Generic {
     ///     - When [stopping](PlayState::Stopped):
     ///         - If [pausing the device](Device::pause) fails
     ///         - If [seeking the stream](AudioStream::seek_to) fails
-    ///     - If the audio [`Device`] has an error
+    ///     - If the output [`Device`] has an error
     /// - [`Handle`]
     ///     - If the player disconnected
     fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
@@ -170,7 +170,7 @@ pub trait Generic {
     /// # Errors
     ///
     /// - [`Player`]
-    ///     - If the audio [`Device`] has an error
+    ///     - If the output [`Device`] has an error
     /// - [`Handle`]
     ///     - If the player disconnected
     fn set_volume(&mut self, volume: f64) -> Result<(), Self::ModifyError>;
@@ -180,7 +180,7 @@ pub trait Generic {
     /// # Errors
     ///
     /// - [`Player`]
-    ///     - If the audio [`Device`] has an error
+    ///     - If the output [`Device`] has an error
     ///     - If [`AudioStream::seek_to`] has an error
     /// - [`Handle`]
     ///     - If the player disconnected
@@ -191,7 +191,7 @@ pub trait Generic {
     /// # Errors
     ///
     /// - [`Player`]
-    ///     - If the audio [`Device`] has an error
+    ///     - If the output [`Device`] has an error
     ///     - If [`AudioStream::seek_by`] has an error
     /// - [`Handle`]
     ///     - If the player disconnected
@@ -324,37 +324,38 @@ impl Shared {
 ///
 /// The player automatically exits when every [`Handle`] goes out of scope
 #[must_use = "Player doesn't do anything unless it's run"]
-pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> {
+pub struct Player<O: Output, D: Decoder, E: Effect, C: OnFileEnd> {
     handle: Receiver<Message>,
+    output: O,
     decoder: D,
     effects: E,
-    audio: A,
-    on_end: O,
+    on_end: C,
     options: DeviceOptions,
     shared: Arc<Shared>,
 }
 
 impl
     Player<
+        crate::output::Default,
         crate::decoder::Default,
         crate::effect::Default,
-        crate::audio::Default,
         on_file_end::Default,
     >
 {
     /// Construct a [`Builder`] filled with defaults.
     #[must_use]
-    pub fn builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_file_end::Default> {
+    pub fn builder() -> Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_file_end::Default>
+    {
         Builder::default()
     }
 }
 
-impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
+impl<D: Decoder, E: Effect, O: Output, C: OnFileEnd> Player<O, D, E, C> {
     fn new(
+        output: O,
         decoder: D,
         effects: E,
-        audio: A,
-        on_end: O,
+        on_end: C,
         options: DeviceOptions,
         volume: f64,
     ) -> (Self, Handle) {
@@ -366,7 +367,7 @@ impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
                 handle: receiver,
                 decoder,
                 effects,
-                audio,
+                output,
                 options,
                 shared,
                 on_end,
@@ -399,24 +400,24 @@ impl<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> Player<D, E, A, O> {
     /// - If there was an issue starting audio output
     pub fn run_blocking(self) -> PlayerResult<()> {
         let (packet_sender, packet_receiver) = crossbeam_channel::bounded(8);
-        // audio control is a rendevous to make sure that the decoder and audio player is on the
+        // output control is a rendevous to make sure that the decoder and audio player is on the
         // same page at all times
-        let (audio_control, audio_control_reciever) = crossbeam_channel::bounded(0);
+        let (output_control, output_control_reciever) = crossbeam_channel::bounded(0);
 
         let source = PacketPlayer::new(
             &self,
             packet_receiver,
-            audio_control_reciever,
+            output_control_reciever,
             self.shared.volume.load(),
         );
-        let device = self.audio.start_paused(self.options.clone(), source)?;
+        let device = self.output.start_paused(self.options.clone(), source)?;
         let decoder = PlayerDecoder::new(&self, packet_sender);
 
         let mut inner = Inner {
             play_state: PlayState::Stopped,
             device,
             decoder,
-            audio_control,
+            output_control,
             handle: &self.handle,
             shared: &self.shared,
             on_end: &self.on_end,
@@ -441,7 +442,7 @@ struct Inner<'a, D: Decoder, O: OnFileEnd> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
-    audio_control: Sender<AudioControl>,
+    output_control: Sender<OutputControl>,
     handle: &'a Receiver<Message>,
     shared: &'a Shared,
     on_end: &'a O,
@@ -500,10 +501,10 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
         }
     }
 
-    fn send_control(&self, message: AudioControl) -> PlayerResult<()> {
-        self.audio_control
+    fn send_control(&self, message: OutputControl) -> PlayerResult<()> {
+        self.output_control
             .send(message)
-            .map_err(|_| PlayerError::AudioDisconnected)
+            .map_err(|_| PlayerError::OutputDisconnected)
     }
 }
 
@@ -515,7 +516,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         // make sure it's playing
         self.set_state(PlayState::Playing)?;
         // flush the packets from the previous song
-        self.send_control(AudioControl::Flush)?;
+        self.send_control(OutputControl::Flush)?;
         // start playing a new one
         self.decoder.decode(source);
         // update the shared times
@@ -549,13 +550,13 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         self.play_state = new;
         // shared is a different play state so that this doesn't have to query it every packet
         self.shared.play_state.store(new);
-        // the audio also has to know so it could send empty data
-        self.send_control(AudioControl::SetState(new))?;
+        // the output also has to know so it could send empty data
+        self.send_control(OutputControl::SetState(new))?;
         Ok(())
     }
 
     fn set_volume(&mut self, new: f64) -> PlayerResult<()> {
-        self.send_control(AudioControl::SetVolume(new))?;
+        self.send_control(OutputControl::SetVolume(new))?;
         self.shared.volume.store(new);
         Ok(())
     }
@@ -563,14 +564,14 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
     fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_to(duration))?;
-        self.send_control(AudioControl::Flush)?;
+        self.send_control(OutputControl::Flush)?;
         Ok(())
     }
 
     fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
         self.decoder
             .modify_stream(|stream| stream.seek_by(duration, direction))?;
-        self.send_control(AudioControl::Flush)?;
+        self.send_control(OutputControl::Flush)?;
         Ok(())
     }
 
@@ -600,11 +601,11 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
 
 impl<'a, D: Decoder, O: OnFileEnd> Drop for Inner<'a, D, O> {
     fn drop(&mut self) {
-        // Stop the audio before dropping, since the sound source expects the audio_control sender
+        // Stop output before dropping, since the sound source expects the output_control sender
         // to never be disconnected. By stopping it, the sound source never looks at the sender.
         let _ = self
-            .audio_control
-            .send(AudioControl::SetState(PlayState::Stopped));
+            .output_control
+            .send(OutputControl::SetState(PlayState::Stopped));
     }
 }
 
@@ -794,12 +795,12 @@ impl Generic for Handle {
 /// The current state of playing audio in a [`Player`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayState {
-    /// Audio is playing; packets are being decoded and sent to an audio device
+    /// Audio is playing; packets are being decoded and sent to an output device
     Playing,
-    /// Audio is not playing, but the position of the player is still intact and the audio device
+    /// Audio is not playing, but the position of the player is still intact and the output device
     /// is alive
     Paused,
-    /// audio is not playing, the position of the player is reset to the beginning, and the audio
+    /// audio is not playing, the position of the player is reset to the beginning, and the output
     /// device is sleeping (if possible)
     Stopped,
 }
@@ -838,18 +839,18 @@ impl Default for PlayState {
 
 /// Any error that can be occurred while the player is running
 #[derive(Debug, Error)]
-// see [`crate::audio::AudioError`] for justification
+// see [`crate::output::OutputError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub enum PlayerError {
     /// The player encountered an error when outputting audio
     #[error("while playing audio: {0}")]
-    Audio(AudioError),
+    Output(OutputError),
     /// The player encountered an error when decoding a file
     #[error("while decoding file: {0}")]
     Decoder(DecoderError),
-    /// The audio thread disconnected before it should have
+    /// The output thread disconnected before it should have
     #[error("audio player disconnected")]
-    AudioDisconnected,
+    OutputDisconnected,
     /// The player has disconnected
     #[error("player disconnected")]
     Disconnected,
@@ -861,14 +862,14 @@ impl From<DecoderError> for PlayerError {
     }
 }
 
-impl From<AudioError> for PlayerError {
-    fn from(v: AudioError) -> Self {
-        Self::Audio(v)
+impl From<OutputError> for PlayerError {
+    fn from(v: OutputError) -> Self {
+        Self::Output(v)
     }
 }
 
 /// A result of an operation on a [`Player`]
-// see [`crate::audio::AudioError`] for justification
+// see [`crate::output::OutputError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type PlayerResult<T> = Result<T, PlayerError>;
 

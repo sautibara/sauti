@@ -4,7 +4,7 @@ use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::{cmp::Ordering, convert::identity, ops::Range};
 
-use crate::audio::DeviceInfo;
+use crate::output::DeviceInfo;
 
 /// An enum representing the acceptable sound sample types
 pub use cpal::SampleFormat;

@@ -1,7 +1,7 @@
 #![allow(clippy::needless_doctest_main)] // the SoundSource impl is too large
-//! Low-level audio handling
+//! Low-level audio output abstractions
 //!
-//! To start playing audio, use an [`Audio`] player to create a [`Device`] using a [`SoundSource`] and
+//! To start playing audio, use an [`Output`] to create an audio [`Device`] using a [`SoundSource`] and
 //! some [`DeviceOptions`]. The [`SoundSource`] is repeatedly called to get every frame of audio
 //! for the device. The device can then be [paused](Device::pause), which pauses the thread, or
 //! [resumed](Device::resume). Device options can also be changed on the fly using
@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! ```
-//! use sauti::audio::prelude::*;
+//! use sauti::output::prelude::*;
 //! use sauti::test::prelude::*;
 //!
 //! fn main() {
@@ -52,6 +52,8 @@
 //! }
 //! ```
 
+// TODO: rename to Output
+
 use std::ops::Deref;
 
 use thiserror::Error;
@@ -59,10 +61,10 @@ use thiserror::Error;
 mod cpal_impl;
 pub use cpal_impl::Cpal;
 
-/// Useful types for interacting with audio
+/// Useful types for interacting with outputting sound
 pub mod prelude {
     pub use super::{
-        Audio, AudioError, AudioResult, Device, DeviceExt, DeviceInfo, DeviceOptions, Sound,
+        Device, DeviceExt, DeviceInfo, DeviceOptions, Output, OutputError, OutputResult, Sound,
         SoundSource,
     };
     pub use crate::data::*;
@@ -70,7 +72,7 @@ pub mod prelude {
 
 use crate::data::{ConvertibleSample, SampleFormat};
 
-/// Find the default [`Audio`] handler
+/// Find the default [`Output`] handler
 #[must_use]
 pub const fn default() -> Default {
     Cpal
@@ -81,7 +83,7 @@ pub type Default = cpal_impl::Cpal;
 /// A low-level interface for outputting audio
 ///
 /// Sound is started using the [start](Self::start) method
-pub trait Audio: Clone + Send + 'static {
+pub trait Output: Clone + Send + 'static {
     /// Create a new [`Device`] and start it running using a [`SoundSource`]
     ///
     /// # Errors
@@ -95,7 +97,7 @@ pub trait Audio: Clone + Send + 'static {
         &self,
         options: impl Into<DeviceOptions>,
         source: S,
-    ) -> AudioResult<Box<dyn Device>>;
+    ) -> OutputResult<Box<dyn Device>>;
     /// Create a new [`Device`] and start it paused using a [`SoundSource`]
     ///
     /// # Errors
@@ -109,7 +111,7 @@ pub trait Audio: Clone + Send + 'static {
         &self,
         options: impl Into<DeviceOptions>,
         source: S,
-    ) -> AudioResult<Box<dyn Device>> {
+    ) -> OutputResult<Box<dyn Device>> {
         let mut device = self.start(options, source)?;
         device.pause()?;
         Ok(device)
@@ -127,17 +129,17 @@ pub trait Device {
     /// - If the device has been invalidated due to a call of [`Self::inner_modify_options`]
     /// - If the device is not available anymore
     /// - Other backend-specific errors
-    fn restart(&mut self) -> AudioResult<()>;
+    fn restart(&mut self) -> OutputResult<()>;
     /// # Errors
     ///
     /// - If the device is not available anymore
     /// - Other backend-specific errors
-    fn resume(&mut self) -> AudioResult<()>;
+    fn resume(&mut self) -> OutputResult<()>;
     /// # Errors
     ///
     /// - If the device is not available anymore
     /// - Other backend-specific errors
-    fn pause(&mut self) -> AudioResult<()>;
+    fn pause(&mut self) -> OutputResult<()>;
 
     fn info(&self) -> &DeviceInfo;
 
@@ -155,7 +157,7 @@ pub trait Device {
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
-    ) -> AudioResult<Option<Box<dyn Device>>>;
+    ) -> OutputResult<Option<Box<dyn Device>>>;
 }
 
 /// Methods specific to a [`Device`] trait object ([`Box<dyn Device>`])
@@ -164,10 +166,10 @@ pub trait DeviceExt: Deref<Target = dyn Device> {
     ///
     /// # Errors
     ///
-    /// - If the new options don't work, then [`AudioError::DeviceOptionsNotSupported`] will be
+    /// - If the new options don't work, then [`OutputError::DeviceOptionsNotSupported`] will be
     /// raised
     /// - Other errors can occur while [restarting](Device::restart)
-    fn merge_options(&mut self, options: DeviceOptions) -> AudioResult<()>;
+    fn merge_options(&mut self, options: DeviceOptions) -> OutputResult<()>;
     /// Add onto this device's current options with `options` and then restart.
     ///
     /// If the new options don't work, then the old options will be used instead
@@ -176,13 +178,13 @@ pub trait DeviceExt: Deref<Target = dyn Device> {
     ///
     /// - If the old options don't work anymore
     /// - Other errors can occur while [restarting](Device::restart)
-    fn try_merge_options(&mut self, options: DeviceOptions) -> AudioResult<()> {
+    fn try_merge_options(&mut self, options: DeviceOptions) -> OutputResult<()> {
         self.merge_options(options.with_backup(*self.info()))
     }
 }
 
 impl DeviceExt for Box<dyn Device> {
-    fn merge_options(&mut self, options: DeviceOptions) -> AudioResult<()> {
+    fn merge_options(&mut self, options: DeviceOptions) -> OutputResult<()> {
         #[allow(deprecated)] // the deprecation is just used to disuade using it elsewhere
         if let Some(new_device) = self.inner_modify_options(options)? {
             *self = new_device;
@@ -193,14 +195,14 @@ impl DeviceExt for Box<dyn Device> {
 
 /// A reusable source for a [`Sound`] played on a [`Device`]
 ///
-/// See [`Audio::start`] for how to use this
+/// See [`Output::start`] for how to use this
 pub trait SoundSource: 'static {
     /// Creates the [`Sound`] which will be used to write each frame
     ///
     /// # Examples
     ///
     /// ```
-    /// # use sauti::audio::prelude::*;
+    /// # use sauti::output::prelude::*;
     /// # struct Beep { frequency: f64 }
     /// # impl SoundSource for Beep {
     /// fn build<S: ConvertibleSample>(
@@ -237,7 +239,7 @@ pub trait SoundSource: 'static {
 /// # Examples
 ///
 /// ```
-/// use sauti::audio::prelude::*;
+/// use sauti::output::prelude::*;
 ///
 /// struct Sine {
 ///     frequency: f64,
@@ -355,7 +357,7 @@ impl std::default::Default for DeviceInfo {
 /// # Backups
 ///
 /// - If this option doesn't work, then backups will be tried one by one until one works.
-/// - If none work, then [`AudioError::DeviceOptionsNotSupported`] will be raised.
+/// - If none work, then [`OutputError::DeviceOptionsNotSupported`] will be raised.
 /// - To use the default options if no others work, then call [`Self::with_default_as_backup`]
 #[derive(Default, Debug, Clone)]
 #[must_use]
@@ -516,11 +518,11 @@ impl<'a> Iterator for DeviceOptionIter<'a> {
     }
 }
 
-/// Some errors that can be encountered while interacting with audio
+/// Some errors that can be encountered while interacting with outputting audio
 #[derive(Error, Debug)]
 // there's a good few errors from different modules, so adding names here makes sense
 #[allow(clippy::module_name_repetitions)]
-pub enum AudioError {
+pub enum OutputError {
     #[error("no devices found")]
     NoDevicesFound,
     #[error("device '{0}' no longer exists")]
@@ -540,6 +542,6 @@ pub enum AudioError {
     UnrecognizedSampleFormat(SampleFormat),
 }
 
-// see [`crate::audio::AudioError`] for justification
+// see [`crate::output::OutputError`] for justification
 #[allow(clippy::module_name_repetitions)]
-pub type AudioResult<T> = Result<T, AudioError>;
+pub type OutputResult<T> = Result<T, OutputError>;

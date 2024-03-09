@@ -1,9 +1,9 @@
-use sauti::audio::prelude::*;
+use sauti::output::prelude::*;
 
 // this program outputs a 440.0 hz sin wave on the main device
 fn main() {
-    let audio = sauti::audio::default();
-    let mut device = audio
+    let output = sauti::output::default();
+    let mut device = output
         .start(
             DeviceOptions::default(),
             Beep {

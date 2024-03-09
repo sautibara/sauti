@@ -2,7 +2,7 @@ use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::audio::prelude::*;
+use crate::output::prelude::*;
 
 /// An implementation of [`Audio`] that collects a given about of frames and sends them to a
 /// [`CollectorHandle`](Handle)
@@ -37,21 +37,21 @@ impl Handle {
     ///
     /// # Panics
     ///
-    /// - If the audio sender hangs up before recieving enough frames
+    /// - If the audio output hangs up before recieving enough frames
     #[must_use]
     pub fn collect(self) -> GenericPacket {
         self.reciever
             .recv()
-            .expect("audio hung up without sending a packet")
+            .expect("output hung up without sending a packet")
     }
 }
 
-impl Audio for Collector {
+impl Output for Collector {
     fn start<S: SoundSource>(
         &self,
         options: impl Into<DeviceOptions>,
         source: S,
-    ) -> AudioResult<Box<dyn crate::audio::Device>> {
+    ) -> OutputResult<Box<dyn crate::output::Device>> {
         let info = DeviceInfo::default().apply(&options.into());
         let device = match info.sample_format {
             SampleFormat::I8 => Device::<i8, S>::start_new_boxed(self, info, source),
@@ -73,7 +73,7 @@ impl Audio for Collector {
         &self,
         options: impl Into<DeviceOptions>,
         source: S,
-    ) -> AudioResult<Box<dyn crate::audio::Device>> {
+    ) -> OutputResult<Box<dyn crate::output::Device>> {
         let info = DeviceInfo::default().apply(&options.into());
         let device = match info.sample_format {
             SampleFormat::I8 => Device::<i8, S>::start_paused_boxed(self, info, source),
@@ -125,7 +125,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
         sink: &Collector,
         info: DeviceInfo,
         source: B,
-    ) -> Box<dyn crate::audio::Device> {
+    ) -> Box<dyn crate::output::Device> {
         let mut new = Self::new(sink, info, source);
         new.start();
         Box::new(new)
@@ -135,7 +135,7 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
         sink: &Collector,
         info: DeviceInfo,
         source: B,
-    ) -> Box<dyn crate::audio::Device> {
+    ) -> Box<dyn crate::output::Device> {
         Box::new(Self::new(sink, info, source))
     }
 
@@ -156,24 +156,24 @@ impl<S: ConvertibleSample, B: SoundSource> Device<S, B> {
     }
 }
 
-impl<S: ConvertibleSample, B: SoundSource> crate::audio::Device for Device<S, B> {
+impl<S: ConvertibleSample, B: SoundSource> crate::output::Device for Device<S, B> {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
 
-    fn pause(&mut self) -> AudioResult<()> {
+    fn pause(&mut self) -> OutputResult<()> {
         // pausing doesn't do anything so far
         Ok(())
     }
 
-    fn resume(&mut self) -> AudioResult<()> {
+    fn resume(&mut self) -> OutputResult<()> {
         if self.current.is_none() {
             self.start();
         }
         Ok(())
     }
 
-    fn restart(&mut self) -> AudioResult<()> {
+    fn restart(&mut self) -> OutputResult<()> {
         // stop the other thread
         if let Some(current) = self.current.take() {
             if let Err(err) = current.join() {
@@ -188,7 +188,7 @@ impl<S: ConvertibleSample, B: SoundSource> crate::audio::Device for Device<S, B>
     fn inner_modify_options(
         &mut self,
         options: DeviceOptions,
-    ) -> AudioResult<Option<Box<dyn crate::audio::Device>>> {
+    ) -> OutputResult<Option<Box<dyn crate::output::Device>>> {
         self.info = self.info.apply(&options);
         Ok(None)
     }
