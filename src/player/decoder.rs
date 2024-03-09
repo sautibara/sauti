@@ -1,7 +1,7 @@
 use crossbeam_channel::Sender;
 use log::error;
 
-use super::{on_end::OnFileEnd, prelude::*};
+use super::{on_file_end::OnFileEnd, prelude::*};
 use crate::{audio::Audio, decoder::prelude::*, effect::Effect};
 
 pub enum NoPacket {

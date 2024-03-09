@@ -45,7 +45,7 @@ use crate::{
     effect::{Effect, List},
 };
 
-use super::{on_end::OnFileEnd, prelude::*, Handle};
+use super::{on_file_end::OnFileEnd, prelude::*, Handle};
 
 macro_rules! impl_supplier {
     (prefix: $prefix:path, trait: $trait:ty, a: $a:ident) => {
@@ -113,7 +113,7 @@ pub struct Builder<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: O
     audio: A,
     options: DeviceOptions,
     volume: f64,
-    on_end: O,
+    on_file_end: O,
 }
 
 impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Builder<D, E, A, O> {
@@ -132,7 +132,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
             self.decoder.give(),
             self.effects.give(),
             self.audio.give(),
-            self.on_end,
+            self.on_file_end,
             self.options,
             self.volume,
         )
@@ -147,7 +147,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
             audio: self.audio,
             options: self.options,
             volume: self.volume,
-            on_end: self.on_end,
+            on_file_end: self.on_file_end,
         }
     }
 
@@ -164,7 +164,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
             audio: self.audio,
             options: self.options,
             volume: self.volume,
-            on_end: self.on_end,
+            on_file_end: self.on_file_end,
         }
     }
 
@@ -180,7 +180,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
             audio: self.audio,
             options: self.options,
             volume: self.volume,
-            on_end: self.on_end,
+            on_file_end: self.on_file_end,
         }
     }
 
@@ -193,26 +193,26 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
             audio,
             options: self.options,
             volume: self.volume,
-            on_end: self.on_end,
+            on_file_end: self.on_file_end,
         }
     }
 
     /// Set the [`Player`] to run `on_end` after each song ends.
     #[must_use]
-    pub fn on_file_end<N: OnFileEnd>(self, on_end: N) -> Builder<D, E, A, N> {
+    pub fn on_file_end<N: OnFileEnd>(self, on_file_end: N) -> Builder<D, E, A, N> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
             audio: self.audio,
             options: self.options,
             volume: self.volume,
-            on_end,
+            on_file_end,
         }
     }
 
     /// Set the [`Player`] to run `func` after each song ends.
     ///
-    /// This is a more specific version of [`Self::on_end`] to aid the compiler with determining
+    /// This is a more specific version of [`Self::on_file_end`] to aid the compiler with determining
     /// types
     #[must_use]
     pub fn on_file_end_run<F>(self, func: F) -> Builder<D, E, A, F>
@@ -235,7 +235,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, A: AudioSupplier, O: OnFileEnd> Buil
     }
 }
 
-impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default> {
+impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_file_end::Default> {
     fn default() -> Self {
         Self {
             decoder: DefaultDecoder,
@@ -243,7 +243,7 @@ impl Default for Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::De
             audio: DefaultAudio,
             options: DeviceOptions::default(),
             volume: 1.0,
-            on_end: on_end::default(),
+            on_file_end: on_file_end::default(),
         }
     }
 }

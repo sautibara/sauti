@@ -4,7 +4,7 @@ use crate::decoder::Decoder;
 use crate::effect::prelude::*;
 use crate::{audio::prelude::*, effect::List};
 
-use super::on_end::OnFileEnd;
+use super::on_file_end::OnFileEnd;
 use super::{AudioControl, Player};
 
 #[derive(Clone)]

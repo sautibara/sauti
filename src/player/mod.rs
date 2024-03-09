@@ -57,8 +57,8 @@
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
-        builder::Builder as PlayerBuilder, on_end, on_end::BoxedPlayer, Generic as _, PlayState,
-        Player, PlayerError, PlayerResult,
+        builder::Builder as PlayerBuilder, on_file_end, on_file_end::BoxedPlayer, Generic as _,
+        Handle as PlayerHandle, PlayState, Player, PlayerError, PlayerResult,
     };
     pub use crate::audio::DeviceOptions;
     pub use crate::data::prelude::*;
@@ -85,12 +85,12 @@ use crate::effect::prelude::*;
 use self::audio::PacketPlayer;
 use self::builder::{Builder, DefaultAudio, DefaultDecoder, DefaultEffect};
 use self::decoder::{NoPacket, PlayerDecoder};
-use self::on_end::OnFileEnd;
+use self::on_file_end::OnFileEnd;
 
 mod audio;
 pub mod builder;
 mod decoder;
-pub mod on_end;
+pub mod on_file_end;
 
 #[derive(Debug)]
 enum Message {
@@ -335,11 +335,16 @@ pub struct Player<D: Decoder, E: Effect, A: Audio, O: OnFileEnd> {
 }
 
 impl
-    Player<crate::decoder::Default, crate::effect::Default, crate::audio::Default, on_end::Default>
+    Player<
+        crate::decoder::Default,
+        crate::effect::Default,
+        crate::audio::Default,
+        on_file_end::Default,
+    >
 {
     /// Construct a [`Builder`] filled with defaults.
     #[must_use]
-    pub fn builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_end::Default> {
+    pub fn builder() -> Builder<DefaultDecoder, DefaultEffect, DefaultAudio, on_file_end::Default> {
         Builder::default()
     }
 }
@@ -470,7 +475,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
         if reason.is_stream_ended() {
             self.on_end.file_ended(&mut {
                 // this dance is necessary so that rust knows to make a trait object here
-                let obj: on_end::BoxedPlayer = Box::new(&mut *self);
+                let obj: on_file_end::BoxedPlayer = Box::new(&mut *self);
                 obj
             })?;
         }

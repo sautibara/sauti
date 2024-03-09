@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::audio::prelude::*;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
-use crate::player::on_end::OnFileEnd;
+use crate::player::on_file_end::OnFileEnd;
 use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
