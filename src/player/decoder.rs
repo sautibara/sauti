@@ -85,4 +85,9 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
 
         self.current_stream = Some(stream);
     }
+
+    /// Stop decoding the current file, returning `true` if a file was being decoded
+    pub fn stop(&mut self) -> bool {
+        self.current_stream.take().is_some()
+    }
 }

@@ -125,7 +125,21 @@ pub trait Generic {
     ///     - If the player disconnected
     fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError>;
 
-    /// Change the [`Player`]'s [`PlayState`] to `play_state`
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, ignoring the previous state.
+    ///
+    /// This bypasses the restrictions around stopping for [`Self::set_state`], and will always
+    /// change the state.
+    ///
+    /// # Errors
+    ///
+    /// - See [`Self::set_state`]
+    fn set_state_unchecked(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
+
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, returning `true` if it succeeds.
+    ///
+    /// Setting the state to [`PlayState::Playing`] or [`PlayState::Paused`] when it is
+    /// [`PlayState::Stopped`] is disallowed, as the player doesn't have a song to pause or resume.
+    /// As such, this function will return `false`. Use [`Self::play`] instead.
     ///
     /// # Errors
     ///
@@ -136,14 +150,14 @@ pub trait Generic {
     ///     - If the output [`Device`] has an error
     /// - [`Handle`]
     ///     - If the player disconnected
-    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
+    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError>;
 
     /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
     ///
     /// # Errors
     ///
     /// - See [`Self::set_state`]
-    fn pause(&mut self) -> Result<(), Self::ModifyError> {
+    fn pause(&mut self) -> Result<bool, Self::ModifyError> {
         self.set_state(PlayState::Paused)
     }
 
@@ -152,7 +166,7 @@ pub trait Generic {
     /// # Errors
     ///
     /// - See [`Self::set_state`]
-    fn resume(&mut self) -> Result<(), Self::ModifyError> {
+    fn resume(&mut self) -> Result<bool, Self::ModifyError> {
         self.set_state(PlayState::Playing)
     }
 
@@ -162,7 +176,8 @@ pub trait Generic {
     ///
     /// - See [`Self::set_state`]
     fn stop(&mut self) -> Result<(), Self::ModifyError> {
-        self.set_state(PlayState::Stopped)
+        self.set_state(PlayState::Stopped)?;
+        Ok(())
     }
 
     /// Change the [`Player`]'s volume to `volume`
@@ -249,8 +264,12 @@ impl<T: ?Sized + Generic> Generic for &mut T {
         (**self).play(source)
     }
 
-    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError> {
         (**self).set_state(play_state)
+    }
+
+    fn set_state_unchecked(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+        (**self).set_state_unchecked(play_state)
     }
 
     fn set_volume(&mut self, volume: f64) -> Result<(), Self::ModifyError> {
@@ -474,16 +493,20 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
     fn no_packet_available(&mut self, reason: &NoPacket) -> PlayerResult<ControlFlow<()>> {
         // if the stream just ended, then run on_end
         if reason.is_stream_ended() {
-            self.on_end.file_ended(&mut {
-                // this dance is necessary so that rust knows to make a trait object here
-                let obj: on_file_end::BoxedPlayer = Box::new(&mut *self);
-                obj
-            })?;
+            self.file_ended()?;
         }
 
         // no packet was sent, so we must block on a message
         // so that there isn't an infinite loop
         self.block_until_message()
+    }
+
+    fn file_ended(&mut self) -> PlayerResult<()> {
+        self.on_end.file_ended(&mut {
+            // this dance is necessary so that rust knows to make a trait object here
+            let obj: on_file_end::BoxedPlayer = Box::new(&mut *self);
+            obj
+        })
     }
 
     fn block_until_message(&mut self) -> PlayerResult<ControlFlow<()>> {
@@ -494,7 +517,9 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
     fn handle(&mut self, message: Message) -> PlayerResult<()> {
         match message {
             Message::Play(source) => self.play(&source),
-            Message::SetState(new) => self.set_state(new),
+            // ignore whether or not setting the state worked, since [`Handle`] handles that
+            // instead.
+            Message::SetState(new) => self.set_state(new).map(drop),
             Message::SetVolume(new) => self.set_volume(new),
             Message::SeekTo(pos) => self.seek_to(pos),
             Message::SeekBy(duration, direction) => self.seek_by(duration, direction),
@@ -506,6 +531,18 @@ impl<'a, D: Decoder, O: OnFileEnd> Inner<'a, D, O> {
             .send(message)
             .map_err(|_| PlayerError::OutputDisconnected)
     }
+
+    fn stop(&mut self) -> PlayerResult<()> {
+        self.device.pause()?;
+        *(self.shared.times)
+            .write()
+            .expect("times should not be poisoned") = None;
+        if self.decoder.stop() {
+            // only run file_ended if a file actually stopped being decoded
+            self.file_ended()?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
@@ -514,7 +551,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
 
     fn play(&mut self, source: &MediaSource) -> PlayerResult<()> {
         // make sure it's playing
-        self.set_state(PlayState::Playing)?;
+        self.set_state_unchecked(PlayState::Playing)?;
         // flush the packets from the previous song
         self.send_control(OutputControl::Flush)?;
         // start playing a new one
@@ -523,13 +560,13 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         if let Some(stream) = self.decoder.stream() {
             let mut times = (self.shared.times)
                 .write()
-                .map_err(|_| PlayerError::Disconnected)?;
+                .expect("times should not be poisoned");
             *times = Some(stream.times());
         }
         Ok(())
     }
 
-    fn set_state(&mut self, new: PlayState) -> PlayerResult<()> {
+    fn set_state_unchecked(&mut self, new: PlayState) -> PlayerResult<()> {
         if self.play_state == new {
             return Ok(());
         }
@@ -538,10 +575,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         let playing_after = !new.is_stopped();
         match (playing_before, playing_after) {
             (false, true) => self.device.resume()?,
-            (true, false) => {
-                self.device.pause()?;
-                self.seek_to(Duration::ZERO)?;
-            }
+            (true, false) => self.stop()?,
             // no need to update
             _ => (),
         }
@@ -550,9 +584,18 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         self.play_state = new;
         // shared is a different play state so that this doesn't have to query it every packet
         self.shared.play_state.store(new);
-        // the output also has to know so it could send empty data
+        // the output also has to know so it could send empty data when paused
         self.send_control(OutputControl::SetState(new))?;
         Ok(())
+    }
+
+    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError> {
+        if self.play_state.is_stopped() && !play_state.is_stopped() {
+            Ok(false)
+        } else {
+            self.set_state_unchecked(play_state)?;
+            Ok(true)
+        }
     }
 
     fn set_volume(&mut self, new: f64) -> PlayerResult<()> {
@@ -681,24 +724,39 @@ impl Handle {
         self.send(Message::Play(source.into()))
     }
 
-    /// Change the [`Player`]'s [`PlayState`] to `play_state`
-    pub fn set_state(&self, play_state: PlayState) -> Result<(), Disconnected> {
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, ignoring the previous state.
+    ///
+    /// See [`Generic::set_state_unchecked`] for more information.
+    pub fn set_state_unchecked(&self, play_state: PlayState) -> Result<(), Disconnected> {
         self.send(Message::SetState(play_state))
     }
 
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, returning if it succeeds.
+    ///
+    /// See [`Generic::set_state`] for more information.
+    pub fn set_state(&self, play_state: PlayState) -> Result<bool, Disconnected> {
+        if self.play_state()?.is_stopped() && !play_state.is_stopped() {
+            Ok(false)
+        } else {
+            self.send(Message::SetState(play_state))?;
+            Ok(true)
+        }
+    }
+
     /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
-    pub fn pause(&self) -> Result<(), Disconnected> {
+    pub fn pause(&self) -> Result<bool, Disconnected> {
         self.set_state(PlayState::Paused)
     }
 
     /// Change the [`Player`]'s [`PlayState`] to [`Playing`](PlayState::Playing)
-    pub fn resume(&self) -> Result<(), Disconnected> {
+    pub fn resume(&self) -> Result<bool, Disconnected> {
         self.set_state(PlayState::Playing)
     }
 
     /// Change the [`Player`]'s [`PlayState`] to [`Stopped`](PlayState::Stopped)
     pub fn stop(&self) -> Result<(), Disconnected> {
-        self.set_state(PlayState::Stopped)
+        // stopping will never fail
+        self.send(Message::SetState(PlayState::Stopped))
     }
 
     /// Change the [`Player`]'s volume to `volume`
@@ -751,7 +809,11 @@ impl Generic for Handle {
         Self::play(self, source.clone())
     }
 
-    fn set_state(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+    fn set_state_unchecked(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError> {
+        Self::set_state_unchecked(self, play_state)
+    }
+
+    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError> {
         Self::set_state(self, play_state)
     }
 
@@ -797,10 +859,10 @@ impl Generic for Handle {
 pub enum PlayState {
     /// Audio is playing; packets are being decoded and sent to an output device
     Playing,
-    /// Audio is not playing, but the position of the player is still intact and the output device
-    /// is alive
+    /// Audio is not playing, but there is still a song in the player, and the output device is
+    /// alive
     Paused,
-    /// audio is not playing, the position of the player is reset to the beginning, and the output
+    /// audio is not playing, there is no song stored in the player, and the output
     /// device is sleeping (if possible)
     Stopped,
 }

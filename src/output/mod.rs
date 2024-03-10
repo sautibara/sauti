@@ -52,8 +52,6 @@
 //! }
 //! ```
 
-// TODO: rename to Output
-
 use std::ops::Deref;
 
 use thiserror::Error;
