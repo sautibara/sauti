@@ -50,6 +50,11 @@ impl Effect for ResizeChannels {
         input: SoundPacket<S>,
         output_spec: &StreamSpec,
     ) -> SoundPacket<S> {
-        input.resize_and_map_channels(output_spec.channels, Self::map_channels)
+        // only resize channels if it's necessary
+        if output_spec.channels == input.channels() {
+            input
+        } else {
+            input.resize_and_map_channels(output_spec.channels, Self::map_channels)
+        }
     }
 }

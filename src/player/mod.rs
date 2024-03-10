@@ -858,6 +858,8 @@ impl Handle {
         })?
     }
 
+    // TODO: Handle::wait using a barrier that's sent to the player
+
     /// Returns `true` if the [`Player`] has disconnected
     #[must_use]
     pub fn disconnected(&self) -> bool {

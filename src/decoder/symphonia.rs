@@ -1,6 +1,7 @@
 use std::{fs::File, io::Cursor, ops::Deref, option::Option, sync::Arc, time::Duration};
 
 use crossbeam::atomic::AtomicCell;
+use log::trace;
 use symphonia::core::{
     audio::{AudioBuffer, AudioBufferRef, Signal},
     codecs::{CodecRegistry, DecoderOptions},
@@ -75,6 +76,8 @@ impl Symphonia {
             .time_base
             .ok_or_else(|| unsupported(&error_source))?;
 
+        let is_vorbis = track.codec_params.codec == symphonia::core::codecs::CODEC_TYPE_VORBIS;
+
         let stream = Stream {
             file: reader.format,
             decoder,
@@ -86,7 +89,14 @@ impl Symphonia {
             time_base,
         };
 
-        Ok(Box::new(stream))
+        let default = Box::new(stream);
+        // the vorbis implementation tends to spit out different sized packets
+        if is_vorbis {
+            trace!("symphonia is reading a vorbis track, using a buffered AudioStream");
+            Ok(Box::new(buffered::AudioStream::wrap(default)))
+        } else {
+            Ok(default)
+        }
     }
 }
 
@@ -134,7 +144,7 @@ impl AudioStream for Stream {
         self.times
             .current_frame
             .fetch_add(symphonia_packet.frames());
-        let packet = symphonia_packet.into();
+        let packet: GenericPacket = symphonia_packet.into();
         Ok(Some(packet))
     }
 

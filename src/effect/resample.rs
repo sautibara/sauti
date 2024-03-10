@@ -1,5 +1,6 @@
 #![allow(clippy::cast_precision_loss)] // the sample rates shouldn't be that big
 
+use log::trace;
 use rubato::{
     Resampler as _, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
@@ -11,7 +12,7 @@ use super::prelude::*;
 /// Custom speeds are also possible with [`Resample::by`]
 ///
 /// The current implementation uses [`rubato`]. This means that whenever the input or output
-/// [`StreamSpec`] change, or the amount of frames in the input [`SoundPacket`] changes, the
+/// [`StreamSpec`]s or the amount of frames in the input [`SoundPacket`] changes, the
 /// resampler has to be remade, which is often fairly intensive. As such, it relies on the
 /// [`Decoder`](crate::decoder::Decoder) to provide consistently-sized packets.
 ///
@@ -130,6 +131,8 @@ impl Inner {
             input_spec.channels == output_spec.channels,
             "input channel count should be the same as the output before resampling"
         );
+
+        trace!("creating new resampler");
 
         let resampler = SincFixedIn::new(
             output_spec.sample_rate as f64 / input_spec.sample_rate as f64 / ratio,

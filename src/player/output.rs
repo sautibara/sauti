@@ -1,4 +1,5 @@
 use crossbeam_channel::{select, Receiver};
+use log::warn;
 
 use crate::decoder::Decoder;
 use crate::effect::prelude::*;
@@ -73,11 +74,17 @@ impl<E: Effect, S: ConvertibleSample> Sound<S> for PacketSound<E, S> {
             // get the next packet or control signal
             match self.packet() {
                 // there was a packet! play it
-                Ok(packet) => {
+                Ok(packet) if packet.frames() > 0 => {
                     Self::copy_next_frame(packet, channels, index);
                     let (channels, max_frames) = (packet.channels(), packet.frames());
                     self.advance_index(channels, max_frames);
                     return;
+                }
+                // there was a packet, but it has no frames
+                Ok(_) => {
+                    warn!("packet recieved had no frames");
+                    channels.fill(S::EQUILIBRIUM);
+                    self.current_packet = None;
                 }
                 // there wasn't a packet. Handle the signal, and keep trying to find one.
                 Err(control) => {

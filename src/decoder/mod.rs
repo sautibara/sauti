@@ -34,12 +34,13 @@ use thiserror::Error;
 
 use crate::data::GenericPacket;
 
+pub mod buffered;
 mod symphonia;
 
 /// Useful types for interacting with a [`Decoder`]
 pub mod prelude {
     pub use super::{
-        AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult, StreamTimes,
+        buffered, AudioStream, AudioStreamExt, Decoder, DecoderError, DecoderResult, StreamTimes,
     };
     pub use crate::data::prelude::*;
 }
@@ -113,6 +114,12 @@ pub trait AudioStream {
     /// - If there is an error found while decoding
     /// - If there is an error with IO
     /// - If there is a backend-specific error
+    ///
+    /// # Implementors
+    ///
+    /// If your implementation doesn't send a consistently sized packet, then wrap the stream in a
+    /// [`buffered::AudioStream`]. Users of this crate should not be required to wrap every decoder
+    /// in a [`buffered::Decoder`].
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>>;
 
     /// Seek the stream to a given `duration`, measured from the start

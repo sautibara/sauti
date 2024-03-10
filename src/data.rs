@@ -223,6 +223,29 @@ impl GenericPacket {
         }
     }
 
+    /// Joins the samples of two packets together
+    ///
+    /// # Panics
+    ///
+    /// - If the [`StreamSpec`]s of the two packets mismatch
+    #[must_use]
+    pub fn join(self, other: &Self) -> Self {
+        get!(self => |packet| packet.join(&other.convert()).into())
+    }
+
+    /// Split a packet in two at `index`, which is counted as a frame
+    ///
+    /// # Panics
+    ///
+    /// - If `index` is out of bounds of this packet
+    #[must_use]
+    pub fn split(&self, index: usize) -> (Self, Self) {
+        get!(self => |packet| {
+            let (left, right) = packet.split(index);
+            (left.into(), right.into())
+        })
+    }
+
     /// Returns `true` if `self` is "equivalent" to `other`
     ///
     /// The underlying sample formats don't have to be the same, but once converted to the same format,
@@ -636,6 +659,40 @@ impl<S: ConvertibleSample> SoundPacket<S> {
                     .swap(from_frame + channel, to_frame + channel);
             }
         }
+    }
+
+    /// Joins the samples of two packets together
+    ///
+    /// # Panics
+    ///
+    /// - If the [`StreamSpec`]s of the two packets mismatch
+    pub fn join(mut self, other: &Self) -> Self {
+        assert!(
+            self.spec() == other.spec(),
+            "StreamSpecs of two joined packets should be the same"
+        );
+        self.interleaved_samples
+            .extend_from_slice(other.interleaved_samples());
+        self
+    }
+
+    /// Split a packet in two at `index`, which is counted as a frame
+    ///
+    /// # Panics
+    ///
+    /// - If `index` is out of bounds of this packet (`index` > `self.frames()`)
+    pub fn split(&self, index: usize) -> (Self, Self) {
+        assert!(
+            index <= self.frames(),
+            "index of split should be in-bounds of packet"
+        );
+
+        let (left, right) = self.interleaved_samples.split_at(index * self.channels());
+
+        (
+            Self::from_interleaved(Vec::from(left), *self.spec()),
+            Self::from_interleaved(Vec::from(right), *self.spec()),
+        )
     }
 
     /// Convert the packet to a new type
