@@ -630,10 +630,22 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
     }
 
     fn seek_to(&mut self, duration: Duration) -> PlayerResult<()> {
-        self.decoder
-            .modify_stream(|stream| stream.seek_to(duration))?;
-        self.send_control(OutputControl::Flush)?;
-        Ok(())
+        let res = self
+            .decoder
+            .modify_stream(|stream| stream.seek_to(duration));
+        // if the seek was out of bounds, stop the player
+        if matches!(
+            res,
+            Err(PlayerError::Decoder(DecoderError::SeekError {
+                reason: SeekError::OutOfBounds,
+                ..
+            }))
+        ) {
+            self.stop()
+        } else {
+            res?;
+            self.send_control(OutputControl::Flush)
+        }
     }
 
     fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
@@ -650,6 +662,7 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         ) {
             self.stop()
         } else {
+            res?;
             self.send_control(OutputControl::Flush)
         }
     }
