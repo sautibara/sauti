@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -129,8 +130,8 @@ impl AudioStream for Empty {
         Duration::ZERO
     }
 
-    fn times(&self) -> Box<dyn StreamTimes> {
-        Box::new(Self)
+    fn times(&self) -> Arc<dyn StreamTimes> {
+        Arc::new(Self)
     }
 }
 

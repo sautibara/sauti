@@ -77,15 +77,15 @@ Commands:
         }
         Some("state") => {
             if let Some(state) = message.next() {
-                set_state(handle, Some(state))?;
+                set_parsed_state(handle, Some(state))?;
             } else {
                 get_state(handle)?;
             }
         }
-        Some("set_state") => set_state(handle, message.next())?,
-        Some("pause") => println!("success: {}", handle.pause()?),
-        Some("resume") => println!("success: {}", handle.resume()?),
-        Some("stop") => handle.stop()?,
+        Some("set_state") => set_parsed_state(handle, message.next())?,
+        Some("pause") => set_state(handle, PlayState::Paused)?,
+        Some("resume") => set_state(handle, PlayState::Playing)?,
+        Some("stop") => set_state(handle, PlayState::Stopped)?,
         Some("get_state") => get_state(handle)?,
         Some("volume") => {
             if let Some(volume) = message.next() {
@@ -114,11 +114,18 @@ fn play(handle: &Handle, path: &str) -> Result<(), Disconnected> {
     Ok(())
 }
 
-fn set_state(handle: &Handle, state: Option<&str>) -> Result<(), Disconnected> {
+fn set_parsed_state(handle: &Handle, state: Option<&str>) -> Result<(), Disconnected> {
     if let Some(state) = state.and_then(parse_state) {
-        println!("success: {}", handle.set_state(state)?);
+        set_state(handle, state)?;
     } else {
         println!("Usage: set_state <state>");
+    }
+    Ok(())
+}
+
+fn set_state(handle: &Handle, state: PlayState) -> Result<(), Disconnected> {
+    if !handle.set_state(state)? {
+        println!("failed to change state to {state:?}: player is stopped");
     }
     Ok(())
 }
@@ -180,10 +187,13 @@ fn seek_by(
 }
 
 fn get_times(handle: &Handle) -> Result<(), Disconnected> {
-    if let Some(((position, duration), progress)) = handle.times()?.zip(handle.progress()?) {
+    #[allow(clippy::option_if_let_else)] // too big of an if statement
+    if let Some(times) = handle.times()? {
         println!(
-            "pos: {position:?}, dur: {duration:?} ({:.1}%)",
-            progress * 100.0
+            "pos: {:?}, dur: {:?} ({:.1}%)",
+            times.position(),
+            times.duration(),
+            times.progress() * 100.0
         );
     } else {
         println!("no song playing :(");

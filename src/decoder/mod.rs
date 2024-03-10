@@ -28,7 +28,7 @@
 //! );
 //! ```
 
-use std::{default::Default as _, fmt::Debug, path::PathBuf, time::Duration};
+use std::{default::Default as _, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 
 use thiserror::Error;
 
@@ -149,6 +149,12 @@ pub trait AudioStream {
     fn position(&self) -> Duration;
     /// Measure the full duration of the stream, in seconds
     fn duration(&self) -> Duration;
+    /// Get the progress of the current stream from the start to the end
+    ///
+    /// This is implemented as `position / duration`, and returns 1.0 if the duration is 0.0
+    fn progress(&self) -> f64 {
+        duration_div(self.position(), self.duration())
+    }
 
     /// Obtain an [atomic](std::sync::atomic) reference to the stream's position and duration
     ///
@@ -156,7 +162,7 @@ pub trait AudioStream {
     /// instead, as they may be more efficient.
     ///
     /// See [`StreamTimes`] for more information
-    fn times(&self) -> Box<dyn StreamTimes>;
+    fn times(&self) -> Arc<dyn StreamTimes>;
 }
 
 /// Methods specific for an [`AudioStream`] trait object ([`Box<dyn AudioStream>`])
@@ -200,6 +206,24 @@ pub trait StreamTimes: Send + Sync {
     fn position(&self) -> Duration;
     /// Measure the full duration of the stream, in seconds
     fn duration(&self) -> Duration;
+    /// Get the progress of the current stream from the start to the end
+    ///
+    /// This is implemented as `position / duration`, and returns 1.0 if the duration is 0.0
+    fn progress(&self) -> f64 {
+        duration_div(self.position(), self.duration())
+    }
+}
+
+// the durations would never get that large
+#[allow(clippy::cast_precision_loss)]
+fn duration_div(num: Duration, denom: Duration) -> f64 {
+    let num = num.as_nanos() as f64;
+    let denom = denom.as_nanos() as f64;
+    if denom == 0.0 {
+        1.0
+    } else {
+        num / denom
+    }
 }
 
 /// An iterator over packets returned by an [`AudioStream`]

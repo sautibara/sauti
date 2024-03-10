@@ -70,7 +70,7 @@ pub mod prelude {
 }
 
 use std::convert::Infallible;
-use std::ops::{ControlFlow, Div};
+use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -127,33 +127,6 @@ pub trait Generic {
     ///     - If the player disconnected
     fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError>;
 
-    /// Change the [`Player`]'s [`PlayState`] to `play_state`, ignoring the previous state.
-    ///
-    /// This bypasses the restrictions around stopping for [`Self::set_state`], and will always
-    /// change the state.
-    ///
-    /// # Errors
-    ///
-    /// - See [`Self::set_state`]
-    fn set_state_unchecked(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
-
-    /// Change the [`Player`]'s [`PlayState`] to `play_state`, returning `true` if it succeeds.
-    ///
-    /// Setting the state to [`PlayState::Playing`] or [`PlayState::Paused`] when it is
-    /// [`PlayState::Stopped`] is disallowed, as the player doesn't have a song to pause or resume.
-    /// As such, this function will return `false`. Use [`Self::play`] instead.
-    ///
-    /// # Errors
-    ///
-    /// - [`Player`]
-    ///     - When [stopping](PlayState::Stopped):
-    ///         - If [pausing the device](Device::pause) fails
-    ///         - If [seeking the stream](AudioStream::seek_to) fails
-    ///     - If the output [`Device`] has an error
-    /// - [`Handle`]
-    ///     - If the player disconnected
-    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError>;
-
     /// Change the [`Player`]'s [`PlayState`] to [`Paused`](PlayState::Paused)
     ///
     /// # Errors
@@ -181,6 +154,33 @@ pub trait Generic {
         self.set_state(PlayState::Stopped)?;
         Ok(())
     }
+
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, returning `true` if it succeeds.
+    ///
+    /// Setting the state to [`PlayState::Playing`] or [`PlayState::Paused`] when it is
+    /// [`PlayState::Stopped`] is disallowed, as the player doesn't have a song to pause or resume.
+    /// As such, this function will return `false`. Use [`Self::play`] instead.
+    ///
+    /// # Errors
+    ///
+    /// - [`Player`]
+    ///     - When [stopping](PlayState::Stopped):
+    ///         - If [pausing the device](Device::pause) fails
+    ///         - If [seeking the stream](AudioStream::seek_to) fails
+    ///     - If the output [`Device`] has an error
+    /// - [`Handle`]
+    ///     - If the player disconnected
+    fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError>;
+
+    /// Change the [`Player`]'s [`PlayState`] to `play_state`, ignoring the previous state.
+    ///
+    /// This bypasses the restrictions around stopping for [`Self::set_state`], and will always
+    /// change the state.
+    ///
+    /// # Errors
+    ///
+    /// - See [`Self::set_state`]
+    fn set_state_unchecked(&mut self, play_state: PlayState) -> Result<(), Self::ModifyError>;
 
     /// Change the [`Player`]'s volume to `volume`
     ///
@@ -247,16 +247,6 @@ pub trait Generic {
     /// - [`Handle`]: If the player disconnected
     fn duration(&self) -> Result<Option<Duration>, Self::GetError>;
 
-    /// Get the [position](Self::position) and [duration](Self::duration) of the current
-    /// [`AudioStream`] in a tuple, or [`None`] if there is no stream playing.
-    ///
-    /// It is laid out as `(position, duration)`
-    ///
-    /// # Errors
-    ///
-    /// - [`Handle`]: If the player disconnected
-    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError>;
-
     /// Get the progress of the [`AudioStream`] to the end of the current file, or [`None`] if
     /// there is no stream playing.
     ///
@@ -266,19 +256,39 @@ pub trait Generic {
     /// # Errors
     ///
     /// - [`Handle`]: If the player disconnected
-    fn progress(&self) -> Result<Option<f64>, Self::GetError> {
-        Ok(self
-            .times()?
-            .map(|(position, duration)| duration_div(position, duration)))
-    }
-}
+    fn progress(&self) -> Result<Option<f64>, Self::GetError>;
 
-// the durations would never get that large
-#[allow(clippy::cast_precision_loss)]
-fn duration_div(num: Duration, denom: Duration) -> f64 {
-    let num = num.as_nanos() as f64;
-    let denom = denom.as_nanos() as f64;
-    (denom != 0.0).then(|| num.div(denom)).unwrap_or(1.0)
+    /// Get a [synchronized](std::sync) reference to the **current** [`AudioStream`]'s position and
+    /// duration. Note that this doesn't synchronize between different played files, so it should
+    /// only be used when it's obtained.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), sauti::player::Disconnected> {
+    /// use sauti::player::prelude::*;
+    ///
+    /// let player = Player::builder().run();
+    /// player.play("../test/test_file.flac")?;
+    ///
+    /// // note that the times won't automatically populate,
+    /// // as the player (in another thread) needs to handle
+    /// // the message first
+    /// if let Some(times) = player.times()? {
+    ///     println!(
+    ///        "pos: {:?}, dur: {:?} ({:.1}%)",
+    ///        times.position(),
+    ///        times.duration(),
+    ///        times.progress(),
+    ///    );
+    /// }
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]: If the player disconnected
+    fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError>;
 }
 
 impl<T: ?Sized + Generic> Generic for &mut T {
@@ -329,8 +339,12 @@ impl<T: ?Sized + Generic> Generic for &mut T {
         (**self).duration()
     }
 
-    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
+    fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError> {
         (**self).times()
+    }
+
+    fn progress(&self) -> Result<Option<f64>, Self::GetError> {
+        (**self).progress()
     }
 }
 
@@ -345,7 +359,7 @@ struct Shared {
     // but AtomicCell<Arc> wouldn't even work because Arc isn't Copy
     // and AtomicCell<Option<Box<dyn StreamTimes>>> doesn't work because StreamTimes can't be Copy
     // because none of the atomics are Copy
-    times: RwLock<Option<Box<dyn StreamTimes>>>,
+    times: RwLock<Option<Arc<dyn StreamTimes>>>,
 }
 
 impl Shared {
@@ -683,11 +697,12 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
         Ok(self.decoder.stream().map(AudioStream::duration))
     }
 
-    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
-        Ok(self
-            .decoder
-            .stream()
-            .map(|stream| (stream.position(), stream.duration())))
+    fn progress(&self) -> Result<Option<f64>, Self::GetError> {
+        Ok(self.decoder.stream().map(AudioStream::progress))
+    }
+
+    fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError> {
+        Ok(self.decoder.stream().map(AudioStream::times))
     }
 }
 
@@ -834,11 +849,11 @@ impl Handle {
     /// Read the shared [`StreamTimes`], mapping it using `func` if it exists or returning [`None`] otherwise
     fn map_times<T>(
         &self,
-        func: impl FnOnce(&dyn StreamTimes) -> T,
+        func: impl FnOnce(&Arc<dyn StreamTimes>) -> T,
     ) -> Result<Option<T>, Disconnected> {
         self.get(|shared| {
             (shared.times.read()).map_or(Err(Disconnected), |times_opt| {
-                Ok(times_opt.as_deref().map(func))
+                Ok(times_opt.as_ref().map(func))
             })
         })?
     }
@@ -898,8 +913,12 @@ impl Generic for Handle {
         self.map_times(|times| times.duration())
     }
 
-    fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError> {
-        self.map_times(|times| (times.position(), times.duration()))
+    fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError> {
+        self.map_times(Arc::clone)
+    }
+
+    fn progress(&self) -> Result<Option<f64>, Self::GetError> {
+        self.map_times(|times| times.progress())
     }
 }
 

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::decoder::prelude::*;
 
@@ -53,8 +53,8 @@ impl AudioStream for Provider {
         crate::decoder::frame_to_duration(frames, sample_rate)
     }
 
-    fn times(&self) -> Box<dyn StreamTimes> {
-        Box::new(Times {
+    fn times(&self) -> Arc<dyn StreamTimes> {
+        Arc::new(Times {
             duration: self.duration(),
         })
     }

@@ -78,9 +78,10 @@ impl Symphonia {
         let stream = Stream {
             file: reader.format,
             decoder,
-            current_frame: Arc::default(),
-            sample_rate: sample_rate as usize,
-            frame_count: usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
+            times: Arc::new(Times::new(
+                usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
+                sample_rate as usize,
+            )),
             error_source,
             time_base,
         };
@@ -115,9 +116,7 @@ struct Stream {
     error_source: ErrorSource,
     file: Box<dyn FormatReader>,
     decoder: Box<dyn SymphoniaDecoder>,
-    current_frame: Arc<AtomicCell<usize>>,
-    frame_count: usize,
-    sample_rate: usize,
+    times: Arc<Times>,
     time_base: TimeBase,
 }
 
@@ -132,7 +131,9 @@ impl AudioStream for Stream {
         let symphonia_packet = (self.decoder)
             .decode(&undecoded_packet)
             .map_err(|err| map_error_with_source(err, &self.error_source))?;
-        self.current_frame.fetch_add(symphonia_packet.frames());
+        self.times
+            .current_frame
+            .fetch_add(symphonia_packet.frames());
         let packet = symphonia_packet.into();
         Ok(Some(packet))
     }
@@ -156,55 +157,53 @@ impl AudioStream for Stream {
         }
         let seeked_to = seek_res.map_err(|err| map_error_with_source(err, &self.error_source))?;
         self.decoder.reset();
-        self.current_frame
+        self.times
+            .current_frame
             .store(self.time_stamp_to_frame(seeked_to.actual_ts));
         Ok(())
     }
 
     fn position(&self) -> Duration {
-        super::frame_to_duration(self.current_frame.load(), self.sample_rate)
+        self.times.position()
     }
 
     fn duration(&self) -> Duration {
-        super::frame_to_duration(self.frame_count, self.sample_rate)
+        self.times.duration()
     }
 
-    fn times(&self) -> Box<dyn StreamTimes> {
-        Box::new(Times::new(self))
+    fn progress(&self) -> f64 {
+        self.times.progress()
+    }
+
+    fn times(&self) -> Arc<dyn StreamTimes> {
+        self.times.clone()
     }
 }
 
 impl Stream {
     #[allow(clippy::cast_possible_truncation)] // it's fine
-    const fn time_stamp_to_frame(&self, time_stamp: TimeStamp) -> usize {
-        if self.time_base.numer == 1 && self.time_base.denom as usize == self.sample_rate {
+    fn time_stamp_to_frame(&self, time_stamp: TimeStamp) -> usize {
+        if self.time_base.numer == 1 && self.time_base.denom as usize == self.times.sample_rate {
             time_stamp as usize
         } else {
-            time_stamp as usize * self.sample_rate * self.time_base.numer as usize
+            time_stamp as usize * self.times.sample_rate * self.time_base.numer as usize
                 / self.time_base.denom as usize
         }
     }
 }
 
 struct Times {
-    current_frame: Arc<AtomicCell<usize>>,
+    current_frame: AtomicCell<usize>,
     frame_count: usize,
     sample_rate: usize,
 }
 
 impl Times {
-    fn new(
-        Stream {
-            current_frame,
+    fn new(frame_count: usize, sample_rate: usize) -> Self {
+        Self {
+            current_frame: AtomicCell::default(),
             frame_count,
             sample_rate,
-            ..
-        }: &Stream,
-    ) -> Self {
-        Self {
-            current_frame: current_frame.clone(),
-            frame_count: *frame_count,
-            sample_rate: *sample_rate,
         }
     }
 }
@@ -216,6 +215,11 @@ impl StreamTimes for Times {
 
     fn position(&self) -> Duration {
         super::frame_to_duration(self.current_frame.load(), self.sample_rate)
+    }
+
+    #[allow(clippy::cast_precision_loss)] // the frames wouldn't get that high
+    fn progress(&self) -> f64 {
+        self.current_frame.load() as f64 / self.frame_count as f64
     }
 }
 
