@@ -137,7 +137,7 @@ pub trait AudioStream {
         let position = self.position();
         let new = match direction {
             Direction::Forward => position + duration,
-            Direction::Backward => position - duration,
+            Direction::Backward => position.checked_sub(duration).unwrap_or_default(),
         };
         self.seek_to(new)
     }
