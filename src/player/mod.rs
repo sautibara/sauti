@@ -54,6 +54,8 @@
 //! # Ok(()) }
 //! ```
 
+// TODO: setting device options
+
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{

@@ -79,6 +79,7 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
     pub fn decode(&mut self, source: &MediaSource) {
         let stream = self.decoder.read(source);
         let Ok(stream) = stream else {
+            // TODO: better error handling in the player
             error!("failed to decode source: {source}");
             return;
         };

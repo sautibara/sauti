@@ -10,6 +10,7 @@ cpal = "0.15.2"
 crossbeam = "0.8.4"
 crossbeam-channel = "0.5.11"
 dasp_sample = "0.11.0"
+itertools = "0.12.1"
 log = "0.4.20"
 paste = "1.0.14"
 rubato = "0.14.1"
@@ -18,6 +19,7 @@ thiserror = "1.0.53"
 
 [dev-dependencies]
 env_logger = "0.11.1"
+regex = "1.10.3"
 
 [lints.clippy]
 enum_glob_use = "warn"
