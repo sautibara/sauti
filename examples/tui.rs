@@ -117,6 +117,8 @@ fn play(handle: &Handle, path: &str) -> Result<(), Disconnected> {
 fn set_state(handle: &Handle, state: Option<&str>) -> Result<(), Disconnected> {
     if let Some(state) = state.and_then(parse_state) {
         println!("success: {}", handle.set_state(state)?);
+    } else {
+        println!("Usage: set_state <state>");
     }
     Ok(())
 }
