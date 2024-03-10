@@ -4,7 +4,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::output::prelude::*;
 
-/// An implementation of [`Audio`] that collects a given about of frames and sends them to a
+/// An implementation of [`Output`] that collects a given about of frames and sends them to a
 /// [`CollectorHandle`](Handle)
 #[derive(Clone)]
 pub struct Collector {

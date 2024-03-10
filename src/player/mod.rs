@@ -337,7 +337,7 @@ impl Shared {
 
 /// A single-track sound file player
 ///
-/// The player routes sound packets obtained through the [`Decoder`] to the output [`Audio`],
+/// The player routes sound packets obtained through the [`Decoder`] to the [`Output`] audio,
 /// applying an [`Effect`] if given. The player may also run a custom callback for when a file ends
 /// through [`OnFileEnd`].
 ///

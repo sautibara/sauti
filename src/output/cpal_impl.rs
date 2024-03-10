@@ -116,7 +116,7 @@ impl SupportedConfig {
 
 // actual cpal stuff //
 
-/// An implementation of [`Audio`] implemented using [`cpal`]
+/// An implementation of [`Output`] implemented using [`cpal`]
 #[derive(Clone)]
 pub struct Cpal;
 

@@ -9,7 +9,7 @@ use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 
-/// Provides implementations for [`Decoder`], [`Audio`], and [`Effect`] that all do nothing
+/// Provides implementations for [`Decoder`], [`Output`], [`Effect`], and [`OnFileEnd`] that all do nothing
 #[derive(Clone, Copy)]
 pub struct Empty;
 
