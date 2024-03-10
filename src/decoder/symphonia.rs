@@ -141,16 +141,20 @@ impl AudioStream for Stream {
         let secs = duration.as_secs();
         let subsecs = duration.as_secs_f64().fract();
         let time = Time::new(secs, subsecs);
-        let seeked_to = self
-            .file
-            .seek(
-                SeekMode::Coarse,
-                symphonia::core::formats::SeekTo::Time {
-                    time,
-                    track_id: None,
-                },
-            )
-            .map_err(|err| map_error_with_source(err, &self.error_source))?;
+        let seek_res = self.file.seek(
+            SeekMode::Coarse,
+            symphonia::core::formats::SeekTo::Time {
+                time,
+                track_id: None,
+            },
+        );
+        if is_end_of_stream(&seek_res) {
+            return Err(DecoderError::SeekError {
+                source: self.error_source.clone(),
+                reason: SeekError::OutOfBounds,
+            });
+        }
+        let seeked_to = seek_res.map_err(|err| map_error_with_source(err, &self.error_source))?;
         self.decoder.reset();
         self.current_frame
             .store(self.time_stamp_to_frame(seeked_to.actual_ts));

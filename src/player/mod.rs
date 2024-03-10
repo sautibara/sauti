@@ -70,7 +70,7 @@ pub mod prelude {
 }
 
 use std::convert::Infallible;
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Div};
 use std::sync::{Arc, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -80,7 +80,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
 
-use crate::decoder::{prelude::*, Direction};
+use crate::decoder::{prelude::*, Direction, SeekError};
 use crate::effect::prelude::*;
 use crate::output::prelude::*;
 
@@ -614,10 +614,21 @@ impl<'a, D: Decoder, O: OnFileEnd> Generic for Inner<'a, D, O> {
     }
 
     fn seek_by(&mut self, duration: Duration, direction: Direction) -> PlayerResult<()> {
-        self.decoder
-            .modify_stream(|stream| stream.seek_by(duration, direction))?;
-        self.send_control(OutputControl::Flush)?;
-        Ok(())
+        let res = self
+            .decoder
+            .modify_stream(|stream| stream.seek_by(duration, direction));
+        // if the seek was out of bounds, stop the player
+        if matches!(
+            res,
+            Err(PlayerError::Decoder(DecoderError::SeekError {
+                reason: SeekError::OutOfBounds,
+                ..
+            }))
+        ) {
+            self.stop()
+        } else {
+            self.send_control(OutputControl::Flush)
+        }
     }
 
     fn play_state(&self) -> Result<PlayState, Self::GetError> {

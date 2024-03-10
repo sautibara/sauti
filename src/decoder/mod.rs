@@ -277,18 +277,18 @@ impl Decoder for List {
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub enum DecoderError {
-    #[error("format of given {0:?} is not supported")]
+    #[error("format of given {0} is not supported")]
     UnsupportedFormat(ErrorSource),
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("malformed data in {source:?}: {}", reason.as_deref().unwrap_or("unknown"))]
+    #[error("malformed data in {source}: {}", reason.as_deref().unwrap_or("unknown"))]
     MalformedData {
         source: ErrorSource,
         reason: Option<String>,
     },
     #[error("no tracks found for {0}")]
     NoTracks(ErrorSource),
-    #[error("failed to seek {source:?}: {reason:?}")]
+    #[error("failed to seek {source}: {reason}")]
     SeekError {
         source: ErrorSource,
         reason: SeekError,
