@@ -180,8 +180,11 @@ fn seek_by(
 }
 
 fn get_times(handle: &Handle) -> Result<(), Disconnected> {
-    if let Some((position, duration)) = handle.times()? {
-        println!("pos: {position:?}, dur: {duration:?}");
+    if let Some(((position, duration), progress)) = handle.times()?.zip(handle.progress()?) {
+        println!(
+            "pos: {position:?}, dur: {duration:?} ({:.1}%)",
+            progress * 100.0
+        );
     } else {
         println!("no song playing :(");
     }

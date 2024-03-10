@@ -256,6 +256,29 @@ pub trait Generic {
     ///
     /// - [`Handle`]: If the player disconnected
     fn times(&self) -> Result<Option<(Duration, Duration)>, Self::GetError>;
+
+    /// Get the progress of the [`AudioStream`] to the end of the current file, or [`None`] if
+    /// there is no stream playing.
+    ///
+    /// This is computed as `position / duration`. If the [duration](Self::duration) is 0, then 1.0
+    /// is returned.
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]: If the player disconnected
+    fn progress(&self) -> Result<Option<f64>, Self::GetError> {
+        Ok(self
+            .times()?
+            .map(|(position, duration)| duration_div(position, duration)))
+    }
+}
+
+// the durations would never get that large
+#[allow(clippy::cast_precision_loss)]
+fn duration_div(num: Duration, denom: Duration) -> f64 {
+    let num = num.as_nanos() as f64;
+    let denom = denom.as_nanos() as f64;
+    (denom != 0.0).then(|| num.div(denom)).unwrap_or(1.0)
 }
 
 impl<T: ?Sized + Generic> Generic for &mut T {
