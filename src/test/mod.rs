@@ -12,7 +12,7 @@
 //! // Use [`Collector`] to take the first two frames
 //! let (collector, handle) = Collector::take(2);
 //! // Use [`Provider`] to provide the packet to the collector
-//! let provider = Provider::provide(generic.clone());
+//! let provider = Provider::repeat(generic.clone());
 //!
 //! // Create a [`Player`] using the [`Collector`] and [`Provider`]
 //! let player = Player::builder()

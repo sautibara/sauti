@@ -11,7 +11,7 @@ pub fn main() -> Result<(), Disconnected> {
 
     loop {
         let line = read_line();
-        if message(&handle, line.trim().split(' '))?.is_break() {
+        if handle_message(&handle, line.trim().split(' '))?.is_break() {
             break;
         }
     }
@@ -43,7 +43,7 @@ pub fn query() {
 /// # Errors
 ///
 /// - If the player disconnects
-pub fn message<'a>(
+pub fn handle_message<'a>(
     handle: &Handle,
     mut message: impl Iterator<Item = &'a str>,
 ) -> Result<ControlFlow<()>, Disconnected> {
