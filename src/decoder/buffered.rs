@@ -1,7 +1,39 @@
 //! Utilities to automatically buffer a [`Decoder`](super::Decoder) or [`AudioStream`](super::AudioStream).
 //!
 //! Through buffering, each are each ensured to send a consistent amount of frames per each packet.
-// TODO: doctest using a new test utility that sends packets from a channel
+//!
+//! # Examples
+//!
+//! ```
+//! use sauti::decoder::prelude::*;
+//! use sauti::test::prelude::*;
+//! # fn main() -> DecoderResult<()> {
+//!
+//! // The stream of packets to input into the buffered decoder
+//! // The buffer will normalize them to the same size
+//! let packets = vec![
+//!     SoundPacket::from_channels(&[&[1, 2, 3]], 44100),
+//!     SoundPacket::from_channels(&[&[1, 2]], 44100),
+//!     SoundPacket::from_channels(&[&[1, 2, 3, 4]], 44100),
+//! ];
+//! let packets = packets.into_iter().map(GenericPacket::from);
+//!
+//! // Provide the stream and wrap it in a buffered [`Decoder`]
+//! let provider = Provider::provide(packets);
+//! let buffered = buffered::Decoder::wrap(provider);
+//!
+//! // The provider ignores the [`MediaSource`], so send it an empty path
+//! let mut stream = buffered.read(&MediaSource::from(""))?;
+//! // Collect all the packets into a Vec
+//! let packets: Vec<GenericPacket> = stream.iter().collect::<DecoderResult<_>>()?;
+//! // Since the first packet had a length of three, all others are normalized to that length
+//! // There are nine frames in total, so three packets of three frames each
+//! assert!(
+//!     packets.len() == 3 && packets.iter().all(|packet| packet.frames() == 3),
+//!     "packets should all have three frames since the first packet had three"
+//! );
+//! # Ok(()) }
+//! ```
 use super::prelude::*;
 
 /// A buffered [`Decoder`](super::Decoder)
