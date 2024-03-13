@@ -11,7 +11,7 @@ pub fn main() -> Result<(), Disconnected> {
 
     loop {
         let line = read_line();
-        if message(&handle, line.trim().split(' '))?.is_break() {
+        if handle_message(&handle, line.trim().split(' '))?.is_break() {
             break;
         }
     }
@@ -43,7 +43,7 @@ pub fn query() {
 /// # Errors
 ///
 /// - If the player disconnects
-pub fn message<'a>(
+pub fn handle_message<'a>(
     handle: &Handle,
     mut message: impl Iterator<Item = &'a str>,
 ) -> Result<ControlFlow<()>, Disconnected> {
@@ -106,6 +106,7 @@ Commands:
 }
 
 fn play(handle: &Handle, path: &str) -> Result<(), Disconnected> {
+    let path = path.trim_matches('\'').trim_matches('"');
     if path.is_empty() {
         println!("Usage: <play> <path>");
     } else {

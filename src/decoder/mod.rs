@@ -1,7 +1,7 @@
 //! Decoding of audio files
 //!
 //! To decode a file, use a [`Decoder`] to obtain an [`AudioStream`] with [`Decoder::read`].
-//! This stream then can be queried for packets using [`next_packet`](AudioStream::next_packet),
+//! This stream can then be queried for packets using [`next_packet`](AudioStream::next_packet),
 //! or the entire stream can be decoded using [`decode_all`](AudioStreamExt::decode_all).
 //! The stream can also be [seeked](AudioStream::seek_to) or queried for its
 //! [position](AudioStream::position) or [duration](AudioStream::duration).

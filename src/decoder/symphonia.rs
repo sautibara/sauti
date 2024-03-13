@@ -13,6 +13,8 @@ use symphonia::core::{
     units::{Time, TimeBase, TimeStamp},
 };
 
+// FIXME: find out why AAC doesn't work
+
 use super::{prelude::*, ErrorSource, SeekError};
 
 pub struct Symphonia {
@@ -107,7 +109,7 @@ impl Decoder for Symphonia {
 
         let symphonia_source: Box<dyn SymphoniaSource> = match source {
             MediaSource::Path(path) => {
-                // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it does
+                // NOTE: as of now, symphonia ignores the hint, but I'd like to imagine that it doesn't
                 if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
                     hint.with_extension(extension);
                 }

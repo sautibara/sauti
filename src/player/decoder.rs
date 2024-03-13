@@ -80,6 +80,7 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         let stream = self.decoder.read(source);
         let Ok(stream) = stream else {
             // TODO: better error handling in the player
+            // TODO: this also doesn't stop the stream
             error!("failed to decode source: {source}");
             return;
         };
