@@ -106,6 +106,7 @@ Commands:
 }
 
 fn play(handle: &Handle, path: &str) -> Result<(), Disconnected> {
+    let path = path.trim_matches('\'').trim_matches('"');
     if path.is_empty() {
         println!("Usage: <play> <path>");
     } else {
