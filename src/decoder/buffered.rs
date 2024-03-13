@@ -1,7 +1,7 @@
 //! Utilities to automatically buffer a [`Decoder`](super::Decoder) or [`AudioStream`](super::AudioStream).
 //!
 //! Through buffering, each are each ensured to send a consistent amount of frames per each packet.
-// TODO: doctest using a new test utility that sends packets from a channel
+
 use super::prelude::*;
 
 /// A buffered [`Decoder`](super::Decoder)
@@ -48,20 +48,11 @@ impl AudioStream {
         }
     }
 
-    fn extract_if_enough(
-        current: &GenericPacket,
-        frames: usize,
-    ) -> Option<(GenericPacket, Option<GenericPacket>)> {
-        (current.frames() >= frames).then(|| {
-            let (truncated, rest) = current.split(frames);
-            (truncated, (rest.frames() != 0).then_some(rest))
-        })
-    }
-
-    fn next_non_empty_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
+    /// Get the next non-empty packet in the stream
+    fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
         loop {
             let Some(next) = self.inner.next_packet()? else {
-                return Ok(None);
+                break Ok(None);
             };
 
             if next.frames() > 0 {
@@ -69,71 +60,43 @@ impl AudioStream {
             }
         }
     }
-
-    fn frames_or(&mut self, backup: usize) -> usize {
-        if let Some(frames) = self.frames {
-            frames
-        } else {
-            self.frames = Some(backup);
-            backup
-        }
-    }
 }
 
 impl super::AudioStream for AudioStream {
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
-        // extract some from current if there's enough
-        if let Some((extracted, rest)) = (self.current.as_ref().zip(self.frames.as_ref().copied()))
-            .and_then(|(current, frames)| Self::extract_if_enough(current, frames))
-        {
-            self.current = rest;
-            return Ok(Some(extracted));
-        }
-
-        // otherwise get the next non-empty packet from the stream
-        let Some(packet) = self.next_non_empty_packet()? else {
-            return Ok(self.current.take());
+        // get the current packet or take a new one
+        let current: Option<DecoderResult<_>> =
+            (self.current.take().map(Ok)).or_else(|| self.next_packet().transpose());
+        // if there are no packets left in the stream, return [`None`]
+        let Some(current) = current else {
+            return Ok(None);
         };
+        // return any errors if they exist
+        let mut current: GenericPacket = current?;
 
-        // find the wanted amount of frames
-        let packet_frames = packet.frames();
-        let frames = self.frames_or(packet_frames);
+        // get the current frame count or use the frames in the current packet
+        let frames = self.frames.unwrap_or_else(|| {
+            let current_frames = current.frames();
+            self.frames = Some(current_frames);
+            current_frames
+        });
 
-        // if the packet already matches the required frames, then just return it
-        if self.current.is_none() && frames == packet_frames {
-            return Ok(Some(packet));
-        }
-
-        // if the packet and current packets' specs collide, then replace
-        if let Some(current) = &mut self.current {
-            if current.spec() != packet.spec() {
-                // might as well replace the frame count too since effects would have to be
-                // restarted anyways
-                self.frames = Some(packet.frames());
-                let current = std::mem::replace(current, packet);
-                return Ok(Some(current));
-            }
-        }
-
-        // join the new packet onto the current one
-        let mut current = (self.current.take())
-            .map(|current| current.join(&packet))
-            .unwrap_or(packet);
-
-        // get enough frames to match the wanted amount
         loop {
-            // if we have enough frames, cut them off from current and return them
-            if let Some((extracted, rest)) = Self::extract_if_enough(&current, frames) {
-                self.current = rest;
-                return Ok(Some(extracted));
+            // if we already have enough frames, cut them out from the current packet
+            if current.frames() >= frames {
+                let (truncated, rest) = current.split(frames);
+                // rest can have zero frames, but that isn't a problem anymore since the frame
+                // count should already be initialized above
+                self.current = Some(rest);
+                return Ok(Some(truncated));
             }
 
-            // get the next packet or give up
-            let Some(new) = self.next_non_empty_packet()? else {
+            // otherwise, get a new packet from the stream
+            let Some(new) = self.next_packet()? else {
                 return Ok(Some(current));
             };
 
-            // if the specs mismatch, then just return the current packet
+            // if the specs mismatch, just return the current packet and update the specs
             if current.spec() != new.spec() {
                 self.frames = Some(new.frames());
                 self.current = Some(new);
