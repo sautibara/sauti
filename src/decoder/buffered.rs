@@ -107,11 +107,7 @@ impl super::AudioStream for AudioStream {
         let mut current: GenericPacket = current?;
 
         // get the current frame count or use the frames in the current packet
-        let frames = self.frames.unwrap_or_else(|| {
-            let current_frames = current.frames();
-            self.frames = Some(current_frames);
-            current_frames
-        });
+        let frames = *self.frames.get_or_insert_with(|| current.frames());
 
         loop {
             // if we already have enough frames, cut them out from the current packet
