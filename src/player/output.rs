@@ -1,5 +1,5 @@
 use crossbeam_channel::{select, Receiver};
-use log::warn;
+use log::{debug, warn};
 
 use crate::decoder::Decoder;
 use crate::effect::prelude::*;
@@ -42,6 +42,7 @@ impl<E: Effect> SoundSource for PacketPlayer<E> {
             current_packet: None,
             current_index: 0,
             spec: info.into(),
+            last_frames: None,
             // the player starts out paused until it recieves a song to play
             playing: false,
         }
@@ -53,6 +54,7 @@ pub struct PacketSound<E: Effect, S: ConvertibleSample> {
     current_packet: Option<SoundPacket<S>>,
     current_index: usize,
     spec: StreamSpec,
+    last_frames: Option<usize>,
     playing: bool,
 }
 
@@ -104,10 +106,21 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
             },
             recv(self.receiver.packets) -> packet => {
                 let packet = packet.expect("the packet sender should never hang up before exiting");
+                self.detect_frame_change(packet.frames());
                 let effected = self.receiver.effects
                     .apply_to_generic(packet, &self.spec);
                 Ok(effected.convert())
             },
+        }
+    }
+
+    fn detect_frame_change(&mut self, current: usize) {
+        if !self.last_frames.is_some_and(|last| last == current) {
+            debug!(
+                "packet frame count change detected. last: {:?}, current: {current:?}",
+                self.last_frames
+            );
+            self.last_frames = Some(current);
         }
     }
 
