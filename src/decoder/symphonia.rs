@@ -59,10 +59,6 @@ impl Symphonia {
 
         debug!("Symphonia can read {error_source}");
 
-        if reader.format.tracks().is_empty() {
-            return Err(DecoderError::NoTracks(error_source));
-        }
-
         // find the first working track
         let default_track = reader.format.default_track();
         let DecodedTrack {
