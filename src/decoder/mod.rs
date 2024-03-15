@@ -75,7 +75,7 @@ pub trait Decoder: Send + 'static {
     /// - If there is a backend-specific error
     fn read_fallible(&self, source: &MediaSource) -> DecoderResult<Option<Box<dyn AudioStream>>> {
         let res = self.read(source);
-        if matches!(res, Err(DecoderError::UnsupportedFormat(_))) {
+        if matches!(res, Err(DecoderError::UnsupportedFormat { .. })) {
             Ok(None)
         } else {
             res.map(Some)
@@ -92,7 +92,10 @@ pub trait Decoder: Send + 'static {
     fn read(&self, source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         self.read_fallible(source)
             .transpose()
-            .unwrap_or(Err(DecoderError::UnsupportedFormat(source.into())))
+            .unwrap_or(Err(DecoderError::UnsupportedFormat {
+                source: source.into(),
+                reason: None,
+            }))
     }
 }
 
@@ -308,8 +311,17 @@ impl Decoder for List {
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub enum DecoderError {
-    #[error("format of given {0} is not supported")]
-    UnsupportedFormat(ErrorSource),
+    #[error(
+        "format of given {source} is not supported{}",
+        reason.as_ref().map_or(
+            String::new(), 
+            |reason| format!(": {reason}")
+        ),
+    )]
+    UnsupportedFormat {
+        source: ErrorSource,
+        reason: Option<String>,
+    },
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("malformed data in {source}: {}", reason.as_deref().unwrap_or("unknown"))]

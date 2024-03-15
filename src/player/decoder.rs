@@ -78,14 +78,10 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
 
     pub fn decode(&mut self, source: &MediaSource) {
         let stream = self.decoder.read(source);
-        let Ok(stream) = stream else {
-            // TODO: better error handling in the player
-            // TODO: this also doesn't stop the stream
-            error!("failed to decode source: {source}");
-            return;
-        };
-
-        self.current_stream = Some(stream);
+        match stream {
+            Ok(stream) => self.current_stream = Some(stream),
+            Err(err) => error!("failed to decode source: {err}"),
+        }
     }
 
     /// Stop decoding the current file, returning `true` if a file was being decoded

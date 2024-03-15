@@ -1,12 +1,13 @@
 use std::{fs::File, io::Cursor, ops::Deref, option::Option, sync::Arc, time::Duration};
 
 use crossbeam::atomic::AtomicCell;
-use log::trace;
+use itertools::Itertools;
+use log::{debug, trace};
 use symphonia::core::{
     audio::{AudioBuffer, AudioBufferRef, Signal},
     codecs::{CodecRegistry, DecoderOptions},
     errors::SeekErrorKind,
-    formats::{FormatOptions, FormatReader, SeekMode},
+    formats::{FormatOptions, FormatReader, SeekMode, Track},
     io::{MediaSource as SymphoniaSource, MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
     probe::{Hint, Probe},
@@ -44,6 +45,8 @@ impl Symphonia {
     ) -> DecoderResult<Box<dyn AudioStream>> {
         let source = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
 
+        debug!("Testing if symphonia can decode source: {error_source}");
+
         // read the format of the file (but don't decode yet)
         let reader = (self.probe)
             .format(
@@ -52,45 +55,41 @@ impl Symphonia {
                 &FormatOptions::default(),
                 &MetadataOptions::default(),
             )
-            .map_err(|err| map_error_with_source(err, &error_source))?;
+            .map_err(|err| map_err(err, &error_source, Some("format not supported")))?;
 
-        // get the default track
-        let track = (reader.format)
-            .default_track()
-            .ok_or_else(|| DecoderError::NoTracks(error_source.clone()))?;
+        debug!("Symphonia can read {error_source}");
 
-        // try to decode the track
-        let decoder = self
-            .codec_registry
-            .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|err| map_error_with_source(err, &error_source))?;
+        if reader.format.tracks().is_empty() {
+            return Err(DecoderError::NoTracks(error_source));
+        }
 
-        let sample_rate = track
-            .codec_params
-            .sample_rate
-            .ok_or_else(|| unsupported(&error_source))?;
-        let frame_count = track
-            .codec_params
-            .n_frames
-            .ok_or_else(|| unsupported(&error_source))?;
-        let time_base = track
-            .codec_params
-            .time_base
-            .ok_or_else(|| unsupported(&error_source))?;
+        // find the first working track
+        let default_track = reader.format.default_track();
+        let DecodedTrack {
+            decoder,
+            times,
+            time_base,
+            track_id,
+        } = (default_track.into_iter())
+            .chain(reader.format.tracks())
+            .map(|track| self.decode_track(track, &error_source))
+            .find_or_first(Result::is_ok)
+            .ok_or_else(|| DecoderError::NoTracks(error_source.clone()))??;
 
-        let is_vorbis = track.codec_params.codec == symphonia::core::codecs::CODEC_TYPE_VORBIS;
+        // we suceeded!
+        debug!("Symphonia can decode source: {error_source}");
 
         let stream = Stream {
             file: reader.format,
             decoder,
-            times: Arc::new(Times::new(
-                usize::try_from(frame_count).map_err(|_| unsupported(&error_source))?,
-                sample_rate as usize,
-            )),
+            times,
             error_source,
             time_base,
+            track_id,
         };
 
+        let is_vorbis =
+            stream.decoder.codec_params().codec == symphonia::core::codecs::CODEC_TYPE_VORBIS;
         let default = Box::new(stream);
         // the vorbis implementation tends to spit out different sized packets
         if is_vorbis {
@@ -99,6 +98,47 @@ impl Symphonia {
         } else {
             Ok(default)
         }
+    }
+}
+
+struct DecodedTrack {
+    decoder: Box<dyn SymphoniaDecoder>,
+    times: Arc<Times>,
+    time_base: TimeBase,
+    track_id: u32,
+}
+
+impl Symphonia {
+    fn decode_track(
+        &self,
+        track: &Track,
+        error_source: &ErrorSource,
+    ) -> DecoderResult<DecodedTrack> {
+        // try to decode the codec
+        let decoder = self
+            .codec_registry
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|err| map_err(err, error_source, Some("codec not supported")))?;
+
+        // extract all of the parameters from the codec
+        let sample_rate_u32 = (track.codec_params.sample_rate)
+            .ok_or_else(|| unsupported(error_source, "no sample rate found"))?;
+        let sample_rate = usize::try_from(sample_rate_u32)
+            .map_err(|_| unsupported(error_source, "sample rate is too large"))?;
+        let frame_count = (track.codec_params.n_frames)
+            .and_then(|frames| usize::try_from(frames).ok())
+            .ok_or_else(|| unsupported(error_source, "no frame count found"))?;
+        let time_base = (track.codec_params)
+            .time_base
+            .unwrap_or_else(|| TimeBase::new(1, sample_rate_u32));
+
+        let times = Arc::new(Times::new(frame_count, sample_rate));
+        Ok(DecodedTrack {
+            decoder,
+            times,
+            time_base,
+            track_id: track.id,
+        })
     }
 }
 
@@ -130,19 +170,32 @@ struct Stream {
     decoder: Box<dyn SymphoniaDecoder>,
     times: Arc<Times>,
     time_base: TimeBase,
+    track_id: u32,
 }
 
 impl AudioStream for Stream {
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
-        let undecoded_packet = self.file.next_packet();
-        if is_end_of_stream(&undecoded_packet) {
-            return Ok(None);
-        }
-        let undecoded_packet =
-            undecoded_packet.map_err(|err| map_error_with_source(err, &self.error_source))?;
-        let symphonia_packet = (self.decoder)
-            .decode(&undecoded_packet)
-            .map_err(|err| map_error_with_source(err, &self.error_source))?;
+        // find the next packet from this track
+        let symphonia_packet = loop {
+            let packet = self.file.next_packet();
+            let packet = match packet {
+                Ok(packet) => packet,
+                Err(SymphoniaError::IoError(io_err))
+                    if io_err.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return Ok(None)
+                }
+                Err(err) => return Err(map_err(err, &self.error_source, None)),
+            };
+
+            // we found a packet from this track!
+            if packet.track_id() == self.track_id {
+                break self.decoder.decode(&packet).map_err(|err| {
+                    map_err(err, &self.error_source, Some("failed to decode packet"))
+                })?;
+            }
+        };
+
         self.times
             .current_frame
             .fetch_add(symphonia_packet.frames());
@@ -167,7 +220,7 @@ impl AudioStream for Stream {
                 reason: SeekError::OutOfBounds,
             });
         }
-        let seeked_to = seek_res.map_err(|err| map_error_with_source(err, &self.error_source))?;
+        let seeked_to = seek_res.map_err(|err| map_err(err, &self.error_source, None))?;
         self.decoder.reset();
         self.times
             .current_frame
@@ -272,7 +325,11 @@ impl<S: ConvertibleSample + SymphoniaSample> From<&AudioBuffer<S>> for SoundPack
 }
 
 use symphonia::core::errors::Error as SymphoniaError;
-fn map_error_with_source(error: SymphoniaError, source: &ErrorSource) -> DecoderError {
+fn map_err(
+    error: SymphoniaError,
+    source: &ErrorSource,
+    unsupported_reason: Option<&'static str>,
+) -> DecoderError {
     match error {
         SymphoniaError::IoError(error) => DecoderError::IoError(error),
         SymphoniaError::DecodeError(reason) => DecoderError::MalformedData {
@@ -283,7 +340,13 @@ fn map_error_with_source(error: SymphoniaError, source: &ErrorSource) -> Decoder
             source: source.clone(),
             reason: kind.into(),
         },
-        SymphoniaError::Unsupported(_) => DecoderError::UnsupportedFormat(source.clone()),
+        SymphoniaError::Unsupported(reason) => DecoderError::UnsupportedFormat {
+            source: source.clone(),
+            reason: Some(
+                unsupported_reason.map_or_else(String::new, |reason| format!("{reason}: "))
+                    + reason,
+            ),
+        },
         SymphoniaError::LimitError(error) => DecoderError::Other(Some(error.to_string())),
         SymphoniaError::ResetRequired => {
             DecoderError::Other(Some("decoder needs reset".to_string()))
@@ -291,8 +354,11 @@ fn map_error_with_source(error: SymphoniaError, source: &ErrorSource) -> Decoder
     }
 }
 
-fn unsupported(error_source: &ErrorSource) -> DecoderError {
-    DecoderError::UnsupportedFormat(error_source.clone())
+fn unsupported(error_source: &ErrorSource, reason: &'static str) -> DecoderError {
+    DecoderError::UnsupportedFormat {
+        source: error_source.clone(),
+        reason: Some(reason.to_owned()),
+    }
 }
 
 impl From<SeekErrorKind> for SeekError {

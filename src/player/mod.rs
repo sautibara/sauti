@@ -360,6 +360,7 @@ struct Shared {
     // and AtomicCell<Option<Box<dyn StreamTimes>>> doesn't work because StreamTimes can't be Copy
     // because none of the atomics are Copy
     times: RwLock<Option<Arc<dyn StreamTimes>>>,
+    // TODO: make DeviceOptions shared too please
 }
 
 impl Shared {
@@ -859,6 +860,9 @@ impl Handle {
     }
 
     // TODO: Handle::wait using a barrier that's sent to the player
+    // or maybe the crate triggered
+    // to get around errors, when the player hits an error, search the message list for any sync
+    // messages and resolve them
 
     /// Returns `true` if the [`Player`] has disconnected
     #[must_use]
