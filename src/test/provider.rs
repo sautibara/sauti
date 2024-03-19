@@ -71,6 +71,10 @@ impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> AudioStream for
         Ok(())
     }
 
+    fn source(&self) -> &SourceName {
+        &SourceName::Unknown
+    }
+
     fn position(&self) -> std::time::Duration {
         Duration::ZERO
     }

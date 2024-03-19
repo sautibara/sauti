@@ -21,7 +21,7 @@ use thiserror::Error;
 pub mod prelude {
     pub use super::{
         ConvertibleSample, GenericPacket, MediaSource, Sample, SampleFormat, SoundPacket,
-        StreamSpec,
+        SourceName, StreamSpec,
     };
 }
 
@@ -110,6 +110,26 @@ impl Display for MediaSource {
         match self {
             Self::Path(path) => write!(f, "path `{}`", path.display()),
             Self::Buffer(_) => write!(f, "buffer"),
+        }
+    }
+}
+
+/// A description for a [`MediaSource`]
+#[derive(Error, Debug, Clone)]
+pub enum SourceName {
+    #[error("file '{0}'")]
+    File(PathBuf),
+    #[error("buffer")]
+    Buffer,
+    #[error("unknown source")]
+    Unknown,
+}
+
+impl From<&MediaSource> for SourceName {
+    fn from(value: &MediaSource) -> Self {
+        match value {
+            MediaSource::Buffer(_) => Self::Buffer,
+            MediaSource::Path(path) => Self::File(path.to_owned()),
         }
     }
 }

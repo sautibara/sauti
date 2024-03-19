@@ -28,7 +28,7 @@
 //! );
 //! ```
 
-use std::{default::Default as _, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
+use std::{default::Default as _, fmt::Debug, sync::Arc, time::Duration};
 
 use thiserror::Error;
 
@@ -151,6 +151,9 @@ pub trait AudioStream {
         };
         self.seek_to(new)
     }
+
+    /// Returns the source that this decoder was created from
+    fn source(&self) -> &SourceName;
 
     /// Measure the current position of the stream, in seconds
     ///
@@ -319,27 +322,37 @@ pub enum DecoderError {
         ),
     )]
     UnsupportedFormat {
-        source: ErrorSource,
+        source: SourceName,
         reason: Option<String>,
     },
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("malformed data in {source}: {}", reason.as_deref().unwrap_or("unknown"))]
     MalformedData {
-        source: ErrorSource,
+        source: SourceName,
         reason: Option<String>,
     },
     #[error("no tracks found for {0}")]
-    NoTracks(ErrorSource),
+    NoTracks(SourceName),
     #[error("failed to seek {source}: {reason}")]
     SeekError {
-        source: ErrorSource,
+        source: SourceName,
         reason: SeekError,
     },
-    #[error("tried to decode a file into one packet when the file had different StreamSpecs")]
+    #[error("tried to decode an entire file into one packet when the file had multiple different StreamSpecs")]
     SpecMismatch,
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
+}
+
+impl DecoderError {
+    #[must_use]
+    pub const fn log_level(&self) -> log::Level {
+        match self {
+            Self::UnsupportedFormat { .. } | Self::MalformedData { .. }  | Self::NoTracks(_) => log::Level::Warn,
+            Self::IoError(_) | Self::SeekError { .. } | Self::SpecMismatch | Self::Other(_) => log::Level::Error,
+        }
+    }
 }
 
 /// An error that can occur when [seeking](AudioStream::seek_to) an [`AudioStream`]
@@ -351,24 +364,6 @@ pub enum SeekError {
     OutOfBounds,
     #[error("file can only be seeked forward")]
     ForwardOnly,
-}
-
-/// The [`MediaSource`] responsible for an error
-#[derive(Error, Debug, Clone)]
-pub enum ErrorSource {
-    #[error("file '{0}'")]
-    File(PathBuf),
-    #[error("buffer")]
-    Buffer,
-}
-
-impl From<&MediaSource> for ErrorSource {
-    fn from(value: &MediaSource) -> Self {
-        match value {
-            MediaSource::Buffer(_) => Self::Buffer,
-            MediaSource::Path(path) => Self::File(path.to_owned()),
-        }
-    }
 }
 
 /// A result of an operation on a [`Decoder`]

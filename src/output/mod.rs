@@ -540,6 +540,22 @@ pub enum OutputError {
     UnrecognizedSampleFormat(SampleFormat),
 }
 
+impl OutputError {
+    #[must_use]
+    pub const fn log_level(&self) -> log::Level {
+        match self {
+            // these are recoverable
+            Self::DeviceNotAvailable(_) | Self::DeviceNoOutput(_) => log::Level::Warn,
+            // these aren't
+            Self::NoDevicesFound
+            | Self::DeviceOptionsNotSupported { .. }
+            | Self::BackendError(_)
+            | Self::DeviceBackendError { .. }
+            | Self::UnrecognizedSampleFormat(_) => log::Level::Error,
+        }
+    }
+}
+
 // see [`crate::output::OutputError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type OutputResult<T> = Result<T, OutputError>;

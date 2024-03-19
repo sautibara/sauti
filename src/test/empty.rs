@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
 use crate::output::prelude::*;
-use crate::player::on_file_end::OnFileEnd;
+use crate::player::on_error::OnError;
 use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -37,7 +37,7 @@ impl Empty {
             .decoder(Self)
             .output(Self)
             .effects(Self)
-            .on_file_end(Self)
+            .on_error(Self)
     }
 
     fn drain_source<S: SoundSource>(source: &S, info: DeviceInfo) {
@@ -122,6 +122,10 @@ impl AudioStream for Empty {
         Ok(())
     }
 
+    fn source(&self) -> &SourceName {
+        &SourceName::Unknown
+    }
+
     fn position(&self) -> Duration {
         Duration::ZERO
     }
@@ -155,8 +159,12 @@ impl Effect for Empty {
     }
 }
 
-impl OnFileEnd for Empty {
-    fn file_ended(&self, _: &mut BoxedPlayer) -> crate::player::PlayerResult<()> {
-        Ok(())
+impl OnError for Empty {
+    fn handle(
+        &self,
+        _: PlayerError,
+        _: &mut BoxedPlayer,
+    ) -> impl Into<flagset::FlagSet<on_error::Action>> {
+        None
     }
 }

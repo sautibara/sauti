@@ -23,7 +23,7 @@
 //!     // Set the player to send an [`Exit`] signal when the file ends
 //!     // Since the decoder only returns None, the file will immediately end,
 //!     // so the Exit value should be sent right after a file is played
-//!     .on_file_end_run(move |_| { sender.send(Exit).unwrap(); Ok(()) })
+//!     .on_file_end(move |_, _| { sender.send(Exit).unwrap(); Ok(()) })
 //!     // Modify the audio device options to set a sample rate of 48000
 //!     // This won't actually do anything, though
 //!     .options(DeviceOptions::default().with_sample_rate(48000))
@@ -45,7 +45,11 @@ use crate::{
     output::{DeviceOptions, Output},
 };
 
-use super::{on_file_end::OnFileEnd, prelude::*, Handle};
+use super::{
+    on_error::{OnError, StreamEndInfo},
+    prelude::*,
+    Handle,
+};
 
 macro_rules! impl_supplier {
     (prefix: $prefix:path, trait: $trait:ty, a: $a:ident) => {
@@ -107,16 +111,16 @@ impl<E: EffectSupplier, N: EffectSupplier> EffectSupplier for EffectListSupplier
 ///
 /// This takes in [suppliers](DecoderSupplier) that lazily provide a way to obtain each component.
 /// These are eventually consumed when the builder is [run](Self::run) or [built](Self::build).
-pub struct Builder<O: OutputSupplier, D: DecoderSupplier, E: EffectSupplier, C: OnFileEnd> {
+pub struct Builder<O: OutputSupplier, D: DecoderSupplier, E: EffectSupplier, C: OnError> {
     output: O,
     decoder: D,
     effects: E,
-    on_file_end: C,
+    on_error: C,
     options: DeviceOptions,
     volume: f64,
 }
 
-impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Builder<O, D, E, C> {
+impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Builder<O, D, E, C> {
     /// [Build](Self::build) the player and [run](Player::run) it in a separate thread, returning
     /// its handle.
     pub fn run(self) -> Handle {
@@ -132,7 +136,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
             self.output.give(),
             self.decoder.give(),
             self.effects.give(),
-            self.on_file_end,
+            self.on_error,
             self.options,
             self.volume,
         )
@@ -147,7 +151,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
             output: self.output,
             options: self.options,
             volume: self.volume,
-            on_file_end: self.on_file_end,
+            on_error: self.on_error,
         }
     }
 
@@ -164,7 +168,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
             output: self.output,
             options: self.options,
             volume: self.volume,
-            on_file_end: self.on_file_end,
+            on_error: self.on_error,
         }
     }
 
@@ -180,7 +184,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
             output: self.output,
             options: self.options,
             volume: self.volume,
-            on_file_end: self.on_file_end,
+            on_error: self.on_error,
         }
     }
 
@@ -193,20 +197,20 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
             output,
             options: self.options,
             volume: self.volume,
-            on_file_end: self.on_file_end,
+            on_error: self.on_error,
         }
     }
 
     /// Set the [`Player`] to run `on_end` after each song ends.
     #[must_use]
-    pub fn on_file_end<N: OnFileEnd>(self, on_file_end: N) -> Builder<O, D, E, N> {
+    pub fn on_error<N: OnError>(self, on_error: N) -> Builder<O, D, E, N> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
             output: self.output,
             options: self.options,
             volume: self.volume,
-            on_file_end,
+            on_error,
         }
     }
 
@@ -215,11 +219,18 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
     /// This is a more specific version of [`Self::on_file_end`] to aid the compiler with determining
     /// types
     #[must_use]
-    pub fn on_file_end_run<F>(self, func: F) -> Builder<O, D, E, F>
+    pub fn on_file_end<F>(self, func: F) -> Builder<O, D, E, on_error::OnStreamEnd<C, F>>
     where
-        F: Fn(&mut BoxedPlayer) -> PlayerResult<()> + Send + 'static,
+        F: Fn(&mut BoxedPlayer, StreamEndInfo) -> PlayerResult<()> + Send + 'static,
     {
-        self.on_file_end(func)
+        Builder {
+            effects: self.effects,
+            decoder: self.decoder,
+            output: self.output,
+            options: self.options,
+            volume: self.volume,
+            on_error: self.on_error.on_stream_end(func),
+        }
     }
 
     /// Replace the [`DeviceOptions`] used for the output stream
@@ -235,7 +246,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnFileEnd> Bui
     }
 }
 
-impl Default for Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_file_end::Default> {
+impl Default for Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_error::Default> {
     fn default() -> Self {
         Self {
             output: DefaultOutput,
@@ -243,7 +254,7 @@ impl Default for Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_file_e
             effects: DefaultEffect,
             options: DeviceOptions::default(),
             volume: 1.0,
-            on_file_end: on_file_end::default(),
+            on_error: on_error::default(),
         }
     }
 }

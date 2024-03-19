@@ -1,7 +1,7 @@
 use crossbeam_channel::Sender;
 use log::error;
 
-use super::{on_file_end::OnFileEnd, prelude::*};
+use super::{on_error::OnError, prelude::*};
 use crate::{decoder::prelude::*, effect::Effect, output::Output};
 
 pub enum NoPacket {
@@ -28,7 +28,7 @@ pub struct PlayerDecoder<'a, D: Decoder> {
 }
 
 impl<'a, D: Decoder> PlayerDecoder<'a, D> {
-    pub fn new<O: Output, E: Effect, C: OnFileEnd>(
+    pub fn new<O: Output, E: Effect, C: OnError>(
         player: &'a Player<O, D, E, C>,
         packet_sender: Sender<GenericPacket>,
     ) -> Self {
@@ -84,8 +84,12 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         }
     }
 
-    /// Stop decoding the current file, returning `true` if a file was being decoded
-    pub fn stop(&mut self) -> bool {
-        self.current_stream.take().is_some()
+    pub fn source(&self) -> Option<&SourceName> {
+        self.stream().map(AudioStream::source)
+    }
+
+    /// Stop decoding the current file and return it
+    pub fn stop(&mut self) -> Option<Box<dyn AudioStream>> {
+        self.current_stream.take()
     }
 }

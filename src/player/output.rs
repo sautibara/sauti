@@ -5,7 +5,7 @@ use crate::decoder::Decoder;
 use crate::effect::prelude::*;
 use crate::{effect::List, output::prelude::*};
 
-use super::on_file_end::OnFileEnd;
+use super::on_error::OnError;
 use super::{OutputControl, Player};
 
 #[derive(Clone)]
@@ -16,7 +16,7 @@ pub struct PacketPlayer<E: Effect> {
 }
 
 impl<E: Effect> PacketPlayer<E> {
-    pub fn new<D: Decoder, O: Output, C: OnFileEnd>(
+    pub fn new<D: Decoder, O: Output, C: OnError>(
         player: &Player<O, D, E, C>,
         packets: Receiver<GenericPacket>,
         output_control: Receiver<OutputControl>,

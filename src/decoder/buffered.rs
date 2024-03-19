@@ -113,9 +113,7 @@ impl super::AudioStream for AudioStream {
             // if we already have enough frames, cut them out from the current packet
             if current.frames() >= frames {
                 let (truncated, rest) = current.split(frames);
-                // rest can have zero frames, but that isn't a problem anymore since the frame
-                // count should already be initialized above
-                self.current = Some(rest);
+                self.current = (rest.frames() != 0).then_some(rest);
                 return Ok(Some(truncated));
             }
 
@@ -145,6 +143,10 @@ impl super::AudioStream for AudioStream {
         } else {
             res
         }
+    }
+
+    fn source(&self) -> &SourceName {
+        self.inner.source()
     }
 
     fn position(&self) -> std::time::Duration {
