@@ -10,11 +10,12 @@ cpal = "0.15.2"
 crossbeam = "0.8.4"
 crossbeam-channel = "0.5.11"
 dasp_sample = "0.11.0"
+flagset = "0.4.5"
 itertools = "0.12.1"
 log = "0.4.20"
 paste = "1.0.14"
 rubato = "0.15.0"
-symphonia = { version = "0.5.3", features = ["all"] }
+symphonia = { version = "0.5.3", features = ["all", "opt-simd"] }
 thiserror = "1.0.53"
 
 [dev-dependencies]
