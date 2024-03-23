@@ -206,6 +206,15 @@ impl AudioStream for Stream {
     }
 
     fn seek_to(&mut self, duration: Duration) -> DecoderResult<()> {
+        // check if the seek is out of bounds
+        let frames = super::duration_to_frame(duration, self.times.sample_rate);
+        if frames > self.times.frame_count {
+            return Err(DecoderError::SeekError {
+                source: self.source.clone(),
+                reason: SeekError::OutOfBounds,
+            });
+        }
+        // actually seek the file
         let secs = duration.as_secs();
         let subsecs = duration.as_secs_f64().fract();
         let time = Time::new(secs, subsecs);
@@ -216,12 +225,14 @@ impl AudioStream for Stream {
                 track_id: None,
             },
         );
+        // if the seek ended up being out of bounds anyways, then error too
         if is_end_of_stream(&seek_res) {
             return Err(DecoderError::SeekError {
                 source: self.source.clone(),
                 reason: SeekError::OutOfBounds,
             });
         }
+        // update the times
         let seeked_to = seek_res.map_err(|err| map_err(err, &self.source, None))?;
         self.decoder.reset();
         self.times

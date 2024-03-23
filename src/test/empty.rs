@@ -5,12 +5,12 @@ use std::time::Duration;
 use crate::decoder::prelude::*;
 use crate::effect::Effect;
 use crate::output::prelude::*;
-use crate::player::on_error::OnError;
+use crate::player::callback::prelude::*;
 use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 
-/// Provides implementations for [`Decoder`], [`Output`], [`Effect`], and [`OnFileEnd`] that all do nothing
+/// Provides implementations for [`Output`], [`Decoder`], [`Effect`], [`OnStreamEnd`], and [`OnError`] that all do nothing
 #[derive(Clone, Copy)]
 pub struct Empty;
 
@@ -32,12 +32,13 @@ impl Empty {
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self> {
+    pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self, Self> {
         Player::builder()
             .decoder(Self)
             .output(Self)
             .effects(Self)
             .on_error(Self)
+            .on_stream_end(Self)
     }
 
     fn drain_source<S: SoundSource>(source: &S, info: DeviceInfo) {
@@ -160,11 +161,13 @@ impl Effect for Empty {
 }
 
 impl OnError for Empty {
-    fn handle(
-        &self,
-        _: PlayerError,
-        _: &mut BoxedPlayer,
-    ) -> impl Into<flagset::FlagSet<on_error::Action>> {
+    fn handle(&self, _: PlayerError, _: PlayerRef) -> impl Into<callback::ActionSet> {
         None
+    }
+}
+
+impl OnStreamEnd for Empty {
+    fn stream_ended(&self, _: callback::stream_end::Info<'_>) -> PlayerResult<()> {
+        Ok(())
     }
 }

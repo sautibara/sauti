@@ -23,7 +23,7 @@
 //!     // Set the player to send an [`Exit`] signal when the file ends
 //!     // Since the decoder only returns None, the file will immediately end,
 //!     // so the Exit value should be sent right after a file is played
-//!     .on_file_end(move |_, _| { sender.send(Exit).unwrap(); Ok(()) })
+//!     .on_stream_end_run(move |_| { sender.send(Exit).unwrap(); Ok(()) })
 //!     // Modify the audio device options to set a sample rate of 48000
 //!     // This won't actually do anything, though
 //!     .options(DeviceOptions::default().with_sample_rate(48000))
@@ -45,11 +45,7 @@ use crate::{
     output::{DeviceOptions, Output},
 };
 
-use super::{
-    on_error::{OnError, StreamEndInfo},
-    prelude::*,
-    Handle,
-};
+use super::{callback::prelude::*, prelude::*};
 
 macro_rules! impl_supplier {
     (prefix: $prefix:path, trait: $trait:ty, a: $a:ident) => {
@@ -111,19 +107,28 @@ impl<E: EffectSupplier, N: EffectSupplier> EffectSupplier for EffectListSupplier
 ///
 /// This takes in [suppliers](DecoderSupplier) that lazily provide a way to obtain each component.
 /// These are eventually consumed when the builder is [run](Self::run) or [built](Self::build).
-pub struct Builder<O: OutputSupplier, D: DecoderSupplier, E: EffectSupplier, C: OnError> {
+pub struct Builder<
+    O: OutputSupplier,
+    D: DecoderSupplier,
+    E: EffectSupplier,
+    OE: OnError,
+    OSE: OnStreamEnd,
+> {
     output: O,
     decoder: D,
     effects: E,
-    on_error: C,
+    on_error: OE,
+    on_stream_end: OSE,
     options: DeviceOptions,
     volume: f64,
 }
 
-impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Builder<O, D, E, C> {
+impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE: OnStreamEnd>
+    Builder<O, D, E, OE, OSE>
+{
     /// [Build](Self::build) the player and [run](Player::run) it in a separate thread, returning
     /// its handle.
-    pub fn run(self) -> Handle {
+    pub fn run(self) -> PlayerHandle {
         let (player, handle) = self.build();
         player.run();
         handle
@@ -131,12 +136,13 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
 
     /// Finish creating the player with the given options
     #[allow(clippy::type_complexity)] // it's only complex because of the ::Out
-    pub fn build(self) -> (Player<O::Out, D::Out, E::Out, C>, Handle) {
+    pub fn build(self) -> (Player<O::Out, D::Out, E::Out, OE, OSE>, PlayerHandle) {
         Player::new(
             self.output.give(),
             self.decoder.give(),
             self.effects.give(),
             self.on_error,
+            self.on_stream_end,
             self.options,
             self.volume,
         )
@@ -144,7 +150,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
 
     /// Replace the [`Decoder`] used to decode audio files to audio packets
     #[must_use]
-    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<O, N, E, C> {
+    pub fn decoder<N: Decoder>(self, decoder: N) -> Builder<O, N, E, OE, OSE> {
         Builder {
             decoder,
             effects: self.effects,
@@ -152,6 +158,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
             options: self.options,
             volume: self.volume,
             on_error: self.on_error,
+            on_stream_end: self.on_stream_end,
         }
     }
 
@@ -161,7 +168,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
     /// are required to match the packets' [sample rate](effect::Resample) and [channel count](effect::ResizeChannels)
     /// from the decoder to the output stream.
     #[must_use]
-    pub fn effects<N: Effect>(self, effects: N) -> Builder<O, D, N, C> {
+    pub fn effects<N: Effect>(self, effects: N) -> Builder<O, D, N, OE, OSE> {
         Builder {
             decoder: self.decoder,
             effects,
@@ -169,12 +176,16 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
             options: self.options,
             volume: self.volume,
             on_error: self.on_error,
+            on_stream_end: self.on_stream_end,
         }
     }
 
     /// Append an [`Effect`] to the current effect stored in the builder
     #[must_use]
-    pub fn add_effect<N: Effect>(self, effect: N) -> Builder<O, D, EffectListSupplier<E, N>, C> {
+    pub fn add_effect<N: Effect>(
+        self,
+        effect: N,
+    ) -> Builder<O, D, EffectListSupplier<E, N>, OE, OSE> {
         Builder {
             decoder: self.decoder,
             effects: EffectListSupplier {
@@ -185,12 +196,13 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
             options: self.options,
             volume: self.volume,
             on_error: self.on_error,
+            on_stream_end: self.on_stream_end,
         }
     }
 
     /// Replace the [`Output`] used to output audio to the system
     #[must_use]
-    pub fn output<N: Output>(self, output: N) -> Builder<N, D, E, C> {
+    pub fn output<N: Output>(self, output: N) -> Builder<N, D, E, OE, OSE> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
@@ -198,12 +210,13 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
             options: self.options,
             volume: self.volume,
             on_error: self.on_error,
+            on_stream_end: self.on_stream_end,
         }
     }
 
-    /// Set the [`Player`] to run `on_end` after each song ends.
+    /// Set the [`Player`] to run `on_error` for each error
     #[must_use]
-    pub fn on_error<N: OnError>(self, on_error: N) -> Builder<O, D, E, N> {
+    pub fn on_error<N: OnError>(self, on_error: N) -> Builder<O, D, E, N, OSE> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
@@ -211,26 +224,47 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
             options: self.options,
             volume: self.volume,
             on_error,
+            on_stream_end: self.on_stream_end,
         }
     }
 
-    /// Set the [`Player`] to run `func` after each song ends.
+    /// Set the [`Player`] to run `on_error` for each error
     ///
-    /// This is a more specific version of [`Self::on_file_end`] to aid the compiler with determining
+    /// This is a more specific version of [`Self::on_error`] to aid the compiler with determining
     /// types
     #[must_use]
-    pub fn on_file_end<F>(self, func: F) -> Builder<O, D, E, on_error::OnStreamEnd<C, F>>
+    pub fn on_error_run<A, F>(self, func: F) -> Builder<O, D, E, F, OSE>
     where
-        F: Fn(&mut BoxedPlayer, StreamEndInfo) -> PlayerResult<()> + Send + 'static,
+        A: Into<ActionSet>,
+        F: Fn(PlayerError, PlayerRef) -> A + Send + 'static,
     {
+        self.on_error(func)
+    }
+
+    /// Set the [`Player`] to run `on_end` after each song ends.
+    #[must_use]
+    pub fn on_stream_end<N: OnStreamEnd>(self, on_stream_end: N) -> Builder<O, D, E, OE, N> {
         Builder {
             effects: self.effects,
             decoder: self.decoder,
             output: self.output,
             options: self.options,
             volume: self.volume,
-            on_error: self.on_error.on_stream_end(func),
+            on_error: self.on_error,
+            on_stream_end,
         }
+    }
+
+    /// Set the [`Player`] to run `func` after each song ends.
+    ///
+    /// This is a more specific version of [`Self::on_stream_end`] to aid the compiler with determining
+    /// types
+    #[must_use]
+    pub fn on_stream_end_run<F>(self, func: F) -> Builder<O, D, E, OE, F>
+    where
+        F: Fn(callback::stream_end::Info<'_>) -> PlayerResult<()> + Send + 'static,
+    {
+        self.on_stream_end(func)
     }
 
     /// Replace the [`DeviceOptions`] used for the output stream
@@ -246,7 +280,15 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, C: OnError> Build
     }
 }
 
-impl Default for Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_error::Default> {
+impl Default
+    for Builder<
+        DefaultOutput,
+        DefaultDecoder,
+        DefaultEffect,
+        callback::error::Default,
+        callback::stream_end::Default,
+    >
+{
     fn default() -> Self {
         Self {
             output: DefaultOutput,
@@ -254,7 +296,8 @@ impl Default for Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_error:
             effects: DefaultEffect,
             options: DeviceOptions::default(),
             volume: 1.0,
-            on_error: on_error::default(),
+            on_error: callback::error::default(),
+            on_stream_end: callback::stream_end::default(),
         }
     }
 }

@@ -59,13 +59,14 @@
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
-        builder::Builder as PlayerBuilder, on_error, on_error::BoxedPlayer, Generic as _,
+        builder::Builder as PlayerBuilder, callback, callback::PlayerRef, Generic as _,
         Handle as PlayerHandle, PlayState, Player, PlayerError, PlayerResult,
     };
     pub use crate::data::prelude::*;
     pub use crate::decoder::Direction;
     pub use crate::effect::prelude::*;
     pub use crate::output::DeviceOptions;
+    pub use crate::player;
     pub use std::time::Duration;
 }
 
@@ -83,15 +84,15 @@ use thiserror::Error;
 use crate::decoder::{prelude::*, Direction, SeekError};
 use crate::effect::prelude::*;
 use crate::output::prelude::*;
+use callback::prelude::*;
 
 use self::builder::{Builder, DefaultDecoder, DefaultEffect, DefaultOutput};
 use self::decoder::{NoPacket, PlayerDecoder};
-use self::on_error::OnError;
 use self::output::PacketPlayer;
 
 pub mod builder;
+pub mod callback;
 mod decoder;
-pub mod on_error;
 mod output;
 
 #[derive(Debug)]
@@ -112,7 +113,7 @@ enum OutputControl {
 
 /// A generic form of a reference to a [`Player`]
 ///
-/// [`Handle`] is a notable implementor of this, and [`OnFileEnd`] gives this as a parameter.
+/// [`Handle`] is a notable implementor of this, and [`OnStreamEnd`] gives this as a parameter.
 pub trait Generic {
     type ModifyError: Into<PlayerError>;
     type GetError: Into<PlayerError>;
@@ -123,7 +124,6 @@ pub trait Generic {
     ///
     /// - [`Player`]
     ///     - If [resuming](Self::set_state) fails
-    ///     - If a song was [replaced](StreamEndedReason::Replaced)
     /// - [`Handle`]
     ///     - If the player disconnected
     fn play(&mut self, source: &MediaSource) -> Result<(), Self::ModifyError>;
@@ -169,7 +169,6 @@ pub trait Generic {
     ///         - If [pausing the device](Device::pause) fails
     ///         - If [seeking the stream](AudioStream::seek_to) fails
     ///     - If the output [`Device`] has an error
-    ///     - If a song was [stopped](StreamEndedReason::Stop)
     /// - [`Handle`]
     ///     - If the player disconnected
     fn set_state(&mut self, play_state: PlayState) -> Result<bool, Self::ModifyError>;
@@ -379,18 +378,19 @@ impl Shared {
 ///
 /// The player routes sound packets obtained through the [`Decoder`] to the [`Output`] audio,
 /// applying an [`Effect`] if given. The player may also run a custom callback for when a file ends
-/// through [`OnFileEnd`].
+/// through [`OnStreamEnd`] or when an error occurs through [`OnError`].
 ///
 /// To obtain a [`Player`], see [`Builder`].
 ///
 /// The player automatically exits when every [`Handle`] goes out of scope
 #[must_use = "Player doesn't do anything unless it's run"]
-pub struct Player<O: Output, D: Decoder, E: Effect, C: OnError> {
+pub struct Player<O: Output, D: Decoder, E: Effect, OE: OnError, OSE: OnStreamEnd> {
     handle: Receiver<Message>,
     output: O,
     decoder: D,
     effects: E,
-    on_error: C,
+    on_error: OE,
+    on_stream_end: OSE,
     options: DeviceOptions,
     shared: Arc<Shared>,
 }
@@ -400,22 +400,30 @@ impl
         crate::output::Default,
         crate::decoder::Default,
         crate::effect::Default,
-        on_error::Default,
+        callback::error::Default,
+        callback::stream_end::Default,
     >
 {
     /// Construct a [`Builder`] filled with defaults.
     #[must_use]
-    pub fn builder() -> Builder<DefaultOutput, DefaultDecoder, DefaultEffect, on_error::Default> {
+    pub fn builder() -> Builder<
+        DefaultOutput,
+        DefaultDecoder,
+        DefaultEffect,
+        callback::error::Default,
+        callback::stream_end::Default,
+    > {
         Builder::default()
     }
 }
 
-impl<D: Decoder, E: Effect, O: Output, C: OnError> Player<O, D, E, C> {
+impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, D, E, OE, OSE> {
     fn new(
         output: O,
         decoder: D,
         effects: E,
-        on_error: C,
+        on_error: OE,
+        on_stream_end: OSE,
         options: DeviceOptions,
         volume: f64,
     ) -> (Self, Handle) {
@@ -431,6 +439,7 @@ impl<D: Decoder, E: Effect, O: Output, C: OnError> Player<O, D, E, C> {
                 options,
                 shared,
                 on_error,
+                on_stream_end,
             },
             Handle {
                 handle: sender,
@@ -480,6 +489,7 @@ impl<D: Decoder, E: Effect, O: Output, C: OnError> Player<O, D, E, C> {
             handle: &self.handle,
             shared: &self.shared,
             on_error: &self.on_error,
+            on_stream_end: &self.on_stream_end,
         };
 
         inner.run_blocking();
@@ -488,17 +498,18 @@ impl<D: Decoder, E: Effect, O: Output, C: OnError> Player<O, D, E, C> {
 }
 
 #[allow(clippy::struct_field_names)] // "play state" is its own thing
-struct Inner<'a, D: Decoder, O: OnError> {
+struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
     output_control: Sender<OutputControl>,
     handle: &'a Receiver<Message>,
     shared: &'a Shared,
-    on_error: &'a O,
+    on_error: &'a OE,
+    on_stream_end: &'a OSE,
 }
 
-impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
+impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
     fn run_blocking(&mut self) {
         while (self.tick())
             .map_err(|err| self.handle_err(err))
@@ -516,7 +527,7 @@ impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
                 // no reason to block; it already blocked due to packet being sent
                 Ok(()) => Ok(()),
                 // there wasn't a packet available, handle the reason
-                Err(reason) => self.no_packet_available(&reason),
+                Err(reason) => self.no_packet_available(reason),
             }
         } else {
             self.block_until_message()
@@ -538,13 +549,10 @@ impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
         self.recv_or_exit(self.handle.recv())
     }
 
-    fn no_packet_available(&mut self, reason: &NoPacket) -> PlayerResult<()> {
+    fn no_packet_available(&mut self, reason: NoPacket) -> PlayerResult<()> {
         // if the stream just ended, then run on_end
-        if reason.is_stream_ended() {
-            return Err(PlayerError::StreamEnded {
-                source: (self.decoder.source().cloned()).unwrap_or(SourceName::Unknown),
-                reason: StreamEndedReason::EndOfFile,
-            });
+        if let Ok(source) = reason.try_into_stream_ended() {
+            self.stream_ended(source, callback::stream_end::Reason::EndOfFile)?;
         }
 
         // no packet was sent, so we must block on a message
@@ -578,31 +586,42 @@ impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
         // stop the decoder by taking out the stream
         if let Some(stream) = self.decoder.stop() {
             // only emit StreamEnded if a file actually stopped being decoded
-            return Err(PlayerError::StreamEnded {
-                source: stream.source().clone(),
-                reason: StreamEndedReason::Stop,
-            });
+            self.stream_ended(stream.source().clone(), callback::stream_end::Reason::Stop)?;
         }
         Ok(())
     }
 
+    fn stream_ended(
+        &mut self,
+        source: SourceName,
+        reason: callback::stream_end::Reason,
+    ) -> PlayerResult<()> {
+        self.on_stream_end
+            .stream_ended(callback::stream_end::Info {
+                player: self.boxed(),
+                source,
+                reason,
+            })?;
+        Ok(())
+    }
+
     fn handle_err(&mut self, err: PlayerError) -> ControlFlow<()> {
-        let actions = self.on_error.handle(err, &mut self.boxed()).into();
+        let actions = self.on_error.handle(err, self.boxed()).into();
         for action in actions {
             self.handle_action(action)?;
         }
         ControlFlow::Continue(())
     }
 
-    fn handle_action(&mut self, action: on_error::Action) -> ControlFlow<()> {
+    fn handle_action(&mut self, action: callback::Action) -> ControlFlow<()> {
         match action {
-            on_error::Action::Exit => ControlFlow::Break(()),
-            on_error::Action::Stop => self.run_and_handle_or_stop(Self::stop),
-            on_error::Action::RestartOutput => todo!(),
+            callback::Action::Exit => ControlFlow::Break(()),
+            callback::Action::Stop => self.run_and_handle_or_stop(Self::stop),
+            callback::Action::RestartOutput => todo!(),
         }
     }
 
-    fn boxed(&mut self) -> on_error::BoxedPlayer {
+    fn boxed(&mut self) -> callback::PlayerRef {
         Box::new(self)
     }
 
@@ -612,7 +631,7 @@ impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
     ) -> ControlFlow<()> {
         let res = func(self);
         if let Err(err) = res {
-            let actions = self.on_error.handle(err, &mut self.boxed()).into();
+            let actions = self.on_error.handle(err, self.boxed()).into();
             if !actions.is_empty() {
                 return ControlFlow::Break(());
             }
@@ -621,19 +640,19 @@ impl<'a, D: Decoder, O: OnError> Inner<'a, D, O> {
     }
 }
 
-impl<'a, D: Decoder, O: OnError> Generic for Inner<'a, D, O> {
+impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE, OSE> {
     type ModifyError = PlayerError;
     type GetError = Infallible;
 
     fn play(&mut self, source: &MediaSource) -> PlayerResult<()> {
-        // make sure it's playing
-        self.set_state_unchecked(PlayState::Playing)?;
-        // flush the packets from the previous song
-        self.send_control(OutputControl::Flush)?;
         // take out the previous one
         let prev = self.decoder.stop();
         // start playing a new one
-        self.decoder.decode(source);
+        self.decoder.decode(source)?;
+        // flush the packets from the previous song
+        self.send_control(OutputControl::Flush)?;
+        // make sure it's playing
+        self.set_state_unchecked(PlayState::Playing)?;
         // update the shared times
         if let Some(stream) = self.decoder.stream() {
             let mut times = (self.shared.times)
@@ -643,10 +662,10 @@ impl<'a, D: Decoder, O: OnError> Generic for Inner<'a, D, O> {
         }
         // notify that the previous one stopped if it did
         if let Some(prev) = prev {
-            return Err(PlayerError::StreamEnded {
-                source: prev.source().clone(),
-                reason: StreamEndedReason::Replaced,
-            });
+            self.stream_ended(
+                prev.source().clone(),
+                callback::stream_end::Reason::Replaced,
+            )?;
         }
         Ok(())
     }
@@ -694,14 +713,12 @@ impl<'a, D: Decoder, O: OnError> Generic for Inner<'a, D, O> {
             .decoder
             .modify_stream(|stream| stream.seek_to(duration));
         // if the seek was out of bounds, stop the player
-        if matches!(
-            res,
-            Err(PlayerError::Decoder(DecoderError::SeekError {
-                reason: SeekError::OutOfBounds,
-                ..
-            }))
-        ) {
-            self.stop()
+        if let Err(PlayerError::Decoder(DecoderError::SeekError {
+            reason: SeekError::OutOfBounds,
+            source,
+        })) = res
+        {
+            self.stream_ended(source, callback::stream_end::Reason::EndOfFile)
         } else {
             res?;
             self.send_control(OutputControl::Flush)
@@ -713,14 +730,12 @@ impl<'a, D: Decoder, O: OnError> Generic for Inner<'a, D, O> {
             .decoder
             .modify_stream(|stream| stream.seek_by(duration, direction));
         // if the seek was out of bounds, stop the player
-        if matches!(
-            res,
-            Err(PlayerError::Decoder(DecoderError::SeekError {
-                reason: SeekError::OutOfBounds,
-                ..
-            }))
-        ) {
-            self.stop()
+        if let Err(PlayerError::Decoder(DecoderError::SeekError {
+            reason: SeekError::OutOfBounds,
+            source,
+        })) = res
+        {
+            self.stream_ended(source, callback::stream_end::Reason::EndOfFile)
         } else {
             res?;
             self.send_control(OutputControl::Flush)
@@ -752,7 +767,7 @@ impl<'a, D: Decoder, O: OnError> Generic for Inner<'a, D, O> {
     }
 }
 
-impl<'a, D: Decoder, O: OnError> Drop for Inner<'a, D, O> {
+impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'a, D, OE, OSE> {
     fn drop(&mut self) {
         // Stop output before dropping, since the sound source expects the output_control sender
         // to never be disconnected. By stopping it, the sound source never looks at the sender.
@@ -1029,12 +1044,6 @@ pub enum PlayerError {
     /// The player encountered an error when decoding a file
     #[error("while decoding file: {0}")]
     Decoder(DecoderError),
-    /// A file finished playing - no more packets are being sent by the decoder
-    #[error("{source} ended because {reason}")]
-    StreamEnded {
-        source: SourceName,
-        reason: StreamEndedReason,
-    },
     /// The output thread disconnected before it should have
     #[error("audio player disconnected")]
     OutputDisconnected,
@@ -1052,7 +1061,7 @@ impl PlayerError {
         match self {
             Self::Output(out) => out.log_level(),
             Self::Decoder(decoder) => decoder.log_level(),
-            Self::StreamEnded { .. } | Self::Exit => log::Level::Trace,
+            Self::Exit => log::Level::Trace,
             Self::OutputDisconnected => log::Level::Warn,
             Self::Disconnected => log::Level::Error,
         }
@@ -1068,34 +1077,6 @@ impl From<DecoderError> for PlayerError {
 impl From<OutputError> for PlayerError {
     fn from(v: OutputError) -> Self {
         Self::Output(v)
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum StreamEndedReason {
-    #[error("it was stopped")]
-    Stop,
-    #[error("the file ended")]
-    EndOfFile,
-    #[error("it was replaced")]
-    Replaced,
-}
-
-impl StreamEndedReason {
-    /// Returns `true` if the stream ended reason is [`Stop`].
-    ///
-    /// [`Stop`]: StreamEndedReason::Stop
-    #[must_use]
-    pub const fn is_stop(&self) -> bool {
-        matches!(self, Self::Stop)
-    }
-
-    /// Returns `true` if the stream ended reason is [`EndOfFile`].
-    ///
-    /// [`EndOfFile`]: StreamEndedReason::EndOfFile
-    #[must_use]
-    pub const fn is_end_of_file(&self) -> bool {
-        matches!(self, Self::EndOfFile)
     }
 }
 

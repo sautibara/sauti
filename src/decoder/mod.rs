@@ -275,6 +275,16 @@ pub(crate) fn frame_to_duration(frame: usize, sample_rate: usize) -> Duration {
     )
 }
 
+pub(crate) fn duration_to_frame(duration: Duration, sample_rate: usize) -> usize {
+    let secs = duration.as_secs();
+    let nanos = duration.subsec_nanos();
+
+    let secs_frames = secs * sample_rate as u64;
+    let nanos_frames = nanos as usize * sample_rate / 1_000_000_000;
+
+    usize::try_from(secs_frames).expect("duration should fit within a usize") + nanos_frames
+}
+
 /// A list of decoders that are tried in order
 ///
 /// This implements [`Decoder`] itself by sequentially checking each decoder -
@@ -370,3 +380,34 @@ pub enum SeekError {
 // see [`crate::audio::AudioError`] for justification
 #[allow(clippy::module_name_repetitions)]
 pub type DecoderResult<T> = Result<T, DecoderError>;
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    pub fn duration_to_frame() {
+        let sample_rate = 44100;
+        let frames = sample_rate * 2 + sample_rate / 2;
+        let duration = Duration::from_secs_f64(2.5);
+        assert_eq!(frames, super::duration_to_frame(duration, sample_rate));
+    }
+
+    #[test]
+    pub fn frame_to_duration() {
+        let sample_rate = 44100;
+        let frames = sample_rate * 2 + sample_rate / 2;
+        let duration = Duration::from_secs_f64(2.5);
+        assert_eq!(duration, super::frame_to_duration(frames, sample_rate));
+    }
+
+    #[test]
+    pub fn mixed() {
+        let sample_rate = 44100;
+        let original = sample_rate * 2 + sample_rate / 2;
+        let duration = super::frame_to_duration(original, sample_rate);
+        let result = super::duration_to_frame(duration, sample_rate);
+        // there could be rounding errors, so give it some leeway
+        assert!(result - original <= 1);
+    }
+}

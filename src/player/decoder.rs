@@ -1,21 +1,21 @@
 use crossbeam_channel::Sender;
-use log::error;
 
-use super::{on_error::OnError, prelude::*};
+use super::callback::prelude::*;
+use super::prelude::*;
 use crate::{decoder::prelude::*, effect::Effect, output::Output};
 
 pub enum NoPacket {
     NoStream,
-    StreamEnded,
+    StreamEnded(SourceName),
 }
 
 impl NoPacket {
-    /// Returns `true` if the no packet is [`StreamEnded`].
-    ///
-    /// [`StreamEnded`]: NoPacket::StreamEnded
-    #[must_use]
-    pub const fn is_stream_ended(&self) -> bool {
-        matches!(self, Self::StreamEnded)
+    pub fn try_into_stream_ended(self) -> Result<SourceName, Self> {
+        if let Self::StreamEnded(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
     }
 }
 
@@ -28,8 +28,8 @@ pub struct PlayerDecoder<'a, D: Decoder> {
 }
 
 impl<'a, D: Decoder> PlayerDecoder<'a, D> {
-    pub fn new<O: Output, E: Effect, C: OnError>(
-        player: &'a Player<O, D, E, C>,
+    pub fn new<O: Output, E: Effect, OE: OnError, OSE: OnStreamEnd>(
+        player: &'a Player<O, D, E, OE, OSE>,
         packet_sender: Sender<GenericPacket>,
     ) -> Self {
         Self {
@@ -69,23 +69,20 @@ impl<'a, D: Decoder> PlayerDecoder<'a, D> {
         }
     }
 
+    // TODO: make NoPacket store the stream?
     fn next_packet(&mut self) -> PlayerResult<Result<GenericPacket, NoPacket>> {
         let Some(stream) = self.current_stream.as_mut() else {
             return Ok(Err(NoPacket::NoStream));
         };
-        Ok(stream.next_packet()?.ok_or(NoPacket::StreamEnded))
+        Ok(stream
+            .next_packet()?
+            .ok_or_else(|| NoPacket::StreamEnded(stream.source().clone())))
     }
 
-    pub fn decode(&mut self, source: &MediaSource) {
+    pub fn decode(&mut self, source: &MediaSource) -> PlayerResult<()> {
         let stream = self.decoder.read(source);
-        match stream {
-            Ok(stream) => self.current_stream = Some(stream),
-            Err(err) => error!("failed to decode source: {err}"),
-        }
-    }
-
-    pub fn source(&self) -> Option<&SourceName> {
-        self.stream().map(AudioStream::source)
+        self.current_stream = Some(stream?);
+        Ok(())
     }
 
     /// Stop decoding the current file and return it
