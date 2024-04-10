@@ -86,6 +86,7 @@ impl<T> ConvertibleSample for T where
 
 /// A source for a sound file
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MediaSource {
     Path(PathBuf),
     Buffer(Box<[u8]>),
@@ -116,6 +117,7 @@ impl Display for MediaSource {
 
 /// A description for a [`MediaSource`]
 #[derive(Error, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SourceName {
     #[error("file '{0}'")]
     File(PathBuf),
@@ -136,6 +138,7 @@ impl From<&MediaSource> for SourceName {
 
 /// Stores information about an audio stream
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StreamSpec {
     pub channels: usize,
     pub sample_rate: usize,
@@ -160,6 +163,7 @@ impl From<DeviceInfo> for StreamSpec {
 ///
 /// Use [`Self::convert`] to turn this into a more useable type
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GenericPacket {
     I8(SoundPacket<i8>),
     I16(SoundPacket<i16>),
@@ -326,6 +330,7 @@ impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
 /// its sample rate)
 #[must_use]
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SoundPacket<S: ConvertibleSample> {
     interleaved_samples: Vec<S>,
     spec: StreamSpec,

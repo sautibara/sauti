@@ -15,6 +15,7 @@ itertools = "0.12.1"
 log = "0.4.20"
 paste = "1.0.14"
 rubato = "0.15.0"
+serde = { version = "1.0.197", optional = true }
 symphonia = { version = "0.5.3", features = ["all", "opt-simd"] }
 thiserror = "1.0.53"
 
@@ -26,3 +27,6 @@ regex = "1.10.3"
 enum_glob_use = "warn"
 pedantic = "warn"
 nursery = "warn"
+
+[features]
+serde = ["dep:serde"]

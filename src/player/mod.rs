@@ -617,7 +617,7 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
         match action {
             callback::Action::Exit => ControlFlow::Break(()),
             callback::Action::Stop => self.run_and_handle_or_stop(Self::stop),
-            callback::Action::RestartOutput => todo!(),
+            // callback::Action::RestartOutput => todo!(),
         }
     }
 
@@ -990,6 +990,7 @@ impl Generic for Handle {
 
 /// The current state of playing audio in a [`Player`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PlayState {
     /// Audio is playing; packets are being decoded and sent to an output device
     Playing,

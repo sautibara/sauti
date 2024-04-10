@@ -357,8 +357,8 @@ impl std::default::Default for DeviceInfo {
 /// - If this option doesn't work, then backups will be tried one by one until one works.
 /// - If none work, then [`OutputError::DeviceOptionsNotSupported`] will be raised.
 /// - To use the default options if no others work, then call [`Self::with_default_as_backup`]
-#[derive(Default, Debug, Clone)]
 #[must_use]
+#[derive(Default, Debug, Clone)]
 pub struct DeviceOptions {
     pub sample_rate: Option<usize>,
     pub sample_format: Option<SampleFormat>,
