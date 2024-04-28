@@ -304,9 +304,17 @@ pub trait Generic {
     /// # fn main() -> Result<(), sauti::player::Disconnected> {
     /// # env_logger::init();
     /// use sauti::player::prelude::*;
+    /// use sauti::test::prelude::*;
     ///
-    /// let player = Player::builder().run();
-    /// player.play(sauti::test::file())?;
+    /// // Create a sound packet with two frames and two channels
+    /// let packet = SoundPacket::from_channels(&[[1, 2], [3, 4]], 44100);
+    /// let generic = GenericPacket::from(packet);
+    /// // Create the player that continuously repeats the packets
+    /// let player = Player::builder()
+    ///     .decoder(Provider::repeat(generic))
+    ///     .run();
+    ///
+    /// player.play("")?;
     ///
     /// assert_eq!(player.play_state()?, PlayState::Stopped);
     /// player.synchronize();
@@ -861,14 +869,14 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'a, D, OE, OS
 /// // the handle can be used to control the player, so start playing an imaginary file
 /// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
 /// handle.play("")?;
-/// // it may take a bit for the player to recieve the message
-/// sleep(Duration::from_millis(100));
+/// // it may take a bit for the player to recieve the message, so wait for it
+/// handle.synchronize();
 /// // once the player starts playing, it changes to [`PlayState::Playing`]
 /// assert_eq!(handle.play_state()?, PlayState::Playing);
 ///
 /// // the handle can also pause and resume the player
 /// handle.pause()?;
-/// sleep(Duration::from_millis(100));
+/// handle.synchronize();
 /// // and the play state changes as a result
 /// assert_eq!(handle.play_state()?, PlayState::Paused);
 /// # Ok(()) }
