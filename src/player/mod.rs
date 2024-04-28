@@ -77,6 +77,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
+use crossbeam::sync::WaitGroup;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
@@ -86,7 +87,10 @@ use crate::effect::prelude::*;
 use crate::output::prelude::*;
 use callback::prelude::*;
 
-use self::builder::{Builder, DefaultDecoder, DefaultEffect, DefaultOutput};
+use self::builder::{
+    Builder, DecoderSupplier, DefaultDecoder, DefaultEffect, DefaultOutput, EffectSupplier,
+    OutputSupplier,
+};
 use self::decoder::{NoPacket, PlayerDecoder};
 use self::output::PacketPlayer;
 
@@ -102,6 +106,7 @@ enum Message {
     SetVolume(f64),
     SeekTo(Duration),
     SeekBy(Duration, Direction),
+    Synchronize(crossbeam::sync::WaitGroup),
 }
 
 #[derive(Debug)]
@@ -290,6 +295,26 @@ pub trait Generic {
     ///
     /// - [`Handle`]: If the player disconnected
     fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError>;
+
+    /// Block this thread until all previous messages have been recieved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), sauti::player::Disconnected> {
+    /// use sauti::player::prelude::*;
+    ///
+    /// let player = Player::builder().run();
+    /// player.play("../test/test_file.flac")?;
+    ///
+    /// assert_eq!(player.state()?, State::Playing);
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]: If the player disconnected before being able to synchronize
+    fn synchronize(&self) -> Result<(), Self::ModifyError>;
 }
 
 impl<T: ?Sized + Generic> Generic for &mut T {
@@ -347,6 +372,10 @@ impl<T: ?Sized + Generic> Generic for &mut T {
     fn progress(&self) -> Result<Option<f64>, Self::GetError> {
         (**self).progress()
     }
+
+    fn synchronize(&self) -> Result<(), Self::ModifyError> {
+        (**self).synchronize()
+    }
 }
 
 struct Shared {
@@ -393,6 +422,7 @@ pub struct Player<O: Output, D: Decoder, E: Effect, OE: OnError, OSE: OnStreamEn
     on_stream_end: OSE,
     options: DeviceOptions,
     shared: Arc<Shared>,
+    start_playing: bool,
 }
 
 impl
@@ -418,28 +448,27 @@ impl
 }
 
 impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, D, E, OE, OSE> {
-    fn new(
-        output: O,
-        decoder: D,
-        effects: E,
-        on_error: OE,
-        on_stream_end: OSE,
-        options: DeviceOptions,
-        volume: f64,
+    fn new<
+        OS: OutputSupplier<Out = O>,
+        DS: DecoderSupplier<Out = D>,
+        ES: EffectSupplier<Out = E>,
+    >(
+        builder: Builder<OS, DS, ES, OE, OSE>,
     ) -> (Self, Handle) {
         let (sender, receiver) = crossbeam_channel::unbounded();
-        let shared: Arc<Shared> = Arc::new(Shared::new(volume));
+        let shared: Arc<Shared> = Arc::new(Shared::new(builder.volume));
         let weak = Arc::downgrade(&shared);
         (
             Self {
                 handle: receiver,
-                decoder,
-                effects,
-                output,
-                options,
+                decoder: builder.decoder.give(),
+                effects: builder.effects.give(),
+                output: builder.output.give(),
+                options: builder.options,
                 shared,
-                on_error,
-                on_stream_end,
+                on_error: builder.on_error,
+                on_stream_end: builder.on_stream_end,
+                start_playing: builder.start_playing,
             },
             Handle {
                 handle: sender,
@@ -492,7 +521,7 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
             on_stream_end: &self.on_stream_end,
         };
 
-        inner.run_blocking();
+        inner.run_blocking(self.start_playing);
         Ok(())
     }
 }
@@ -510,13 +539,31 @@ struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
 }
 
 impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
-    fn run_blocking(&mut self) {
-        while (self.tick())
-            .map_err(|err| self.handle_err(err))
-            .err()
-            .unwrap_or(ControlFlow::Continue(()))
-            .is_continue()
-        {}
+    fn run_blocking(&mut self, start_playing: bool) {
+        let res = self.run_blocking_fallible(start_playing);
+        assert!(res.is_break());
+    }
+
+    fn run_blocking_fallible(&mut self, start_playing: bool) -> ControlFlow<()> {
+        if start_playing {
+            // send a packet so that the output has something to play
+            Self::try_recover(self.decoder.send_next_packet(), self)?;
+            Self::try_recover(self.set_state_unchecked(PlayState::Playing), self)?;
+        }
+
+        loop {
+            Self::try_recover(self.tick(), self)?;
+        }
+    }
+
+    // these arguments are backwards so that self comes after the result,
+    // making it so that there aren't two mutable borrows at the same time
+    // i dunno why this is necessary, rust weirdness
+    fn try_recover<T>(result: PlayerResult<T>, this: &mut Self) -> ControlFlow<()> {
+        match result {
+            Ok(_) => ControlFlow::Continue(()),
+            Err(err) => this.handle_err(err),
+        }
     }
 
     fn tick(&mut self) -> PlayerResult<()> {
@@ -569,6 +616,11 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
             Message::SetVolume(new) => self.set_volume(new),
             Message::SeekTo(pos) => self.seek_to(pos),
             Message::SeekBy(duration, direction) => self.seek_by(duration, direction),
+            Message::Synchronize(wait_group) => {
+                // the WaitGroup just waits until all references are dropped
+                drop(wait_group);
+                Ok(())
+            }
         }
     }
 
@@ -764,6 +816,11 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE,
 
     fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError> {
         Ok(self.decoder.stream().map(AudioStream::times))
+    }
+
+    fn synchronize(&self) -> Result<(), Self::ModifyError> {
+        // Since this is called on the inner, it is already guaranteed to be synchronized
+        Ok(())
     }
 }
 
@@ -985,6 +1042,14 @@ impl Generic for Handle {
 
     fn progress(&self) -> Result<Option<f64>, Self::GetError> {
         self.map_times(|times| times.progress())
+    }
+
+    fn synchronize(&self) -> Result<(), Self::ModifyError> {
+        let wait_group = WaitGroup::new();
+        self.send(Message::Synchronize(wait_group.clone()))?;
+        wait_group.wait();
+        // check if the player has disconnected, since it could've between sending and waiting
+        (!self.disconnected()).then_some(()).ok_or(Disconnected)
     }
 }
 

@@ -114,13 +114,14 @@ pub struct Builder<
     OE: OnError,
     OSE: OnStreamEnd,
 > {
-    output: O,
-    decoder: D,
-    effects: E,
-    on_error: OE,
-    on_stream_end: OSE,
-    options: DeviceOptions,
-    volume: f64,
+    pub(super) output: O,
+    pub(super) decoder: D,
+    pub(super) effects: E,
+    pub(super) on_error: OE,
+    pub(super) on_stream_end: OSE,
+    pub(super) options: DeviceOptions,
+    pub(super) volume: f64,
+    pub(super) start_playing: bool,
 }
 
 impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE: OnStreamEnd>
@@ -137,15 +138,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
     /// Finish creating the player with the given options
     #[allow(clippy::type_complexity)] // it's only complex because of the ::Out
     pub fn build(self) -> (Player<O::Out, D::Out, E::Out, OE, OSE>, PlayerHandle) {
-        Player::new(
-            self.output.give(),
-            self.decoder.give(),
-            self.effects.give(),
-            self.on_error,
-            self.on_stream_end,
-            self.options,
-            self.volume,
-        )
+        Player::new(self)
     }
 
     /// Replace the [`Decoder`] used to decode audio files to audio packets
@@ -159,6 +152,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error: self.on_error,
             on_stream_end: self.on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -177,6 +171,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error: self.on_error,
             on_stream_end: self.on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -197,6 +192,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error: self.on_error,
             on_stream_end: self.on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -211,6 +207,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error: self.on_error,
             on_stream_end: self.on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -225,6 +222,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error,
             on_stream_end: self.on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -252,6 +250,7 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
             volume: self.volume,
             on_error: self.on_error,
             on_stream_end,
+            start_playing: self.start_playing,
         }
     }
 
@@ -278,6 +277,13 @@ impl<D: DecoderSupplier, E: EffectSupplier, O: OutputSupplier, OE: OnError, OSE:
     pub fn volume(self, volume: f64) -> Self {
         Self { volume, ..self }
     }
+
+    /// Set the output to start as [`PlayState::Playing`]
+    #[must_use]
+    pub const fn start_playing(mut self) -> Self {
+        self.start_playing = true;
+        self
+    }
 }
 
 impl Default
@@ -298,6 +304,7 @@ impl Default
             volume: 1.0,
             on_error: callback::error::default(),
             on_stream_end: callback::stream_end::default(),
+            start_playing: false,
         }
     }
 }
