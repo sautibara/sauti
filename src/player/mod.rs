@@ -19,7 +19,7 @@
 //! let handle = Player::builder().volume(0.5).run();
 //!
 //! // A [`Handle`] can be used to play, pause, and resume a file
-//! handle.play("../test/test_file.flac")?;
+//! handle.play(sauti::test::file())?;
 //! handle.pause()?;
 //! handle.resume()?;
 //!
@@ -275,7 +275,7 @@ pub trait Generic {
     /// use sauti::player::prelude::*;
     ///
     /// let player = Player::builder().run();
-    /// player.play("../test/test_file.flac")?;
+    /// player.play(sauti::test::file())?;
     ///
     /// // note that the times won't automatically populate,
     /// // as the player (in another thread) needs to handle
@@ -302,12 +302,15 @@ pub trait Generic {
     ///
     /// ```
     /// # fn main() -> Result<(), sauti::player::Disconnected> {
+    /// # env_logger::init();
     /// use sauti::player::prelude::*;
     ///
     /// let player = Player::builder().run();
-    /// player.play("../test/test_file.flac")?;
+    /// player.play(sauti::test::file())?;
     ///
-    /// assert_eq!(player.state()?, State::Playing);
+    /// assert_eq!(player.play_state()?, PlayState::Stopped);
+    /// player.synchronize();
+    /// assert_eq!(player.play_state()?, PlayState::Playing);
     /// # Ok(()) }
     /// ```
     ///
@@ -975,11 +978,6 @@ impl Handle {
             })
         })?
     }
-
-    // TODO: Handle::wait using a barrier that's sent to the player
-    // or maybe the crate triggered
-    // to get around errors, when the player hits an error, search the message list for any sync
-    // messages and resolve them
 
     /// Returns `true` if the [`Player`] has disconnected
     #[must_use]

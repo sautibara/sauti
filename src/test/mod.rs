@@ -28,6 +28,8 @@
 //! let given_packet = handle.collect();
 //! assert_eq!(given_packet, generic);
 //! ```
+use crate::data::prelude::*;
+
 mod collector;
 mod empty;
 mod provider;
@@ -41,4 +43,12 @@ pub mod prelude {
     pub use super::Collector;
     pub use super::Empty;
     pub use super::Provider;
+}
+
+/// A test file consisting of a 22050hz square wave
+///
+/// The square wave switches every sample
+#[must_use]
+pub fn file() -> MediaSource {
+    MediaSource::copy_buf(include_bytes!("test_file.flac"))
 }
