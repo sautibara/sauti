@@ -10,7 +10,6 @@
 // TODO: example
 
 use super::{super::prelude::*, Action, ActionSet, PlayerRef};
-use crate::decoder::DecoderError;
 
 use log::trace;
 
@@ -59,7 +58,7 @@ impl OnError for Recover {
     fn handle(&self, err: PlayerError, _: PlayerRef) -> impl Into<ActionSet> {
         match err {
             // TODO: there's some more that can be recovered
-            PlayerError::Decoder(DecoderError::UnsupportedFormat { .. }) => Action::Stop,
+            PlayerError::Decoder(_) => Action::Stop,
             _ => Action::Exit,
         }
     }
