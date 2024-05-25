@@ -64,7 +64,6 @@ impl<E: Effect, S: ConvertibleSample> Sound<S> for PacketSound<E, S> {
             self.handle(&message);
         }
 
-        let index = self.current_index;
         loop {
             // nothing's playing, the sound could just return
             // this has to get checked each loop for if the player pauses
@@ -76,10 +75,10 @@ impl<E: Effect, S: ConvertibleSample> Sound<S> for PacketSound<E, S> {
             // get the next packet or control signal
             match self.packet() {
                 // there was a packet! play it
-                Ok(packet) if packet.frames() > 0 => {
+                Ok((packet, index)) if packet.frames() > 0 => {
                     Self::copy_next_frame(packet, channels, index);
-                    let (channels, max_frames) = (packet.channels(), packet.frames());
-                    self.advance_index(channels, max_frames);
+                    let (channel_count, max_frames) = (packet.channels(), packet.frames());
+                    self.advance_index(channel_count, max_frames);
                     return;
                 }
                 // there was a packet, but it has no frames
@@ -127,14 +126,21 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
     // This is essentially a call of get_or_insert, but it couldn't be used. The lifetimes of
     // &self.current_packet and &mut self would interfere, and there's a chance of of an
     // AudioControl coming up.
-    fn packet(&mut self) -> Result<&SoundPacket<S>, OutputControl> {
+    /// Get the current packet if it is [`Some`], or wait to recieve a new packet if it is
+    /// [`None`]. This also returns the current index of the packet, as it may be reset when a
+    /// packet is recieved.
+    fn packet(&mut self) -> Result<(&SoundPacket<S>, usize), OutputControl> {
         if self.current_packet.is_none() {
             let packet = self.next_packet()?;
             self.current_packet = Some(packet);
+            self.current_index = 0;
         }
 
         // SAFETY: checked if the packet was None above
-        Ok(unsafe { self.current_packet.as_ref().unwrap_unchecked() })
+        Ok((
+            unsafe { self.current_packet.as_ref().unwrap_unchecked() },
+            self.current_index,
+        ))
     }
 
     fn handle(&mut self, message: &OutputControl) {
