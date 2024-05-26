@@ -82,7 +82,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
 
-use crate::decoder::{prelude::*, Direction, SeekError};
+use crate::decoder::{prelude::*, Direction, ExtensionSet, SeekError};
 use crate::effect::prelude::*;
 use crate::output::prelude::*;
 use callback::prelude::*;
@@ -326,6 +326,27 @@ pub trait Generic {
     ///
     /// - [`Handle`]: If the player disconnected before being able to synchronize
     fn synchronize(&self) -> Result<(), Self::ModifyError>;
+
+    /// Get a set of extensions that the player currently supports
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), sauti::player::Disconnected> {
+    /// use sauti::player::prelude::*;
+    ///
+    /// let player = Player::builder().run();
+    /// let extensions = player.supported_extensions()?;
+    ///
+    /// assert!(extensions.contains("mp3"));
+    /// assert!(!extensions.contains("txt"));
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`Handle`]: If the player disconnected
+    fn supported_extensions(&self) -> Result<&ExtensionSet, Self::GetError>;
 }
 
 impl<T: ?Sized + Generic> Generic for &mut T {
@@ -387,6 +408,10 @@ impl<T: ?Sized + Generic> Generic for &mut T {
     fn synchronize(&self) -> Result<(), Self::ModifyError> {
         (**self).synchronize()
     }
+
+    fn supported_extensions(&self) -> Result<&ExtensionSet, Self::GetError> {
+        (**self).supported_extensions()
+    }
 }
 
 struct Shared {
@@ -434,6 +459,7 @@ pub struct Player<O: Output, D: Decoder, E: Effect, OE: OnError, OSE: OnStreamEn
     options: DeviceOptions,
     shared: Arc<Shared>,
     start_playing: bool,
+    supported_extensions: Arc<ExtensionSet>,
 }
 
 impl
@@ -469,10 +495,12 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
         let (sender, receiver) = crossbeam_channel::unbounded();
         let shared: Arc<Shared> = Arc::new(Shared::new(builder.volume));
         let weak = Arc::downgrade(&shared);
+        let decoder = builder.decoder.give();
+        let supported_extensions = Arc::new(decoder.supported_extensions());
         (
             Self {
                 handle: receiver,
-                decoder: builder.decoder.give(),
+                decoder,
                 effects: builder.effects.give(),
                 output: builder.output.give(),
                 options: builder.options,
@@ -480,10 +508,12 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
                 on_error: builder.on_error,
                 on_stream_end: builder.on_stream_end,
                 start_playing: builder.start_playing,
+                supported_extensions: supported_extensions.clone(),
             },
             Handle {
                 handle: sender,
                 shared: weak,
+                supported_extensions,
             },
         )
     }
@@ -530,6 +560,7 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
             shared: &self.shared,
             on_error: &self.on_error,
             on_stream_end: &self.on_stream_end,
+            supported_extensions: &self.supported_extensions,
         };
 
         inner.run_blocking(self.start_playing);
@@ -547,6 +578,7 @@ struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
     shared: &'a Shared,
     on_error: &'a OE,
     on_stream_end: &'a OSE,
+    supported_extensions: &'a ExtensionSet,
 }
 
 impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
@@ -833,6 +865,10 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE,
         // Since this is called on the inner, it is already guaranteed to be synchronized
         Ok(())
     }
+
+    fn supported_extensions(&self) -> Result<&ExtensionSet, Self::GetError> {
+        Ok(self.supported_extensions)
+    }
 }
 
 impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'a, D, OE, OSE> {
@@ -886,6 +922,7 @@ pub struct Handle {
     handle: Sender<Message>,
     // TODO: measure the cost of using Weak instead of Arc
     shared: Weak<Shared>,
+    supported_extensions: Arc<ExtensionSet>,
 }
 
 /// An error representing that a [`Handle`] could not connect to its respective [`Player`]
@@ -992,6 +1029,15 @@ impl Handle {
     pub fn disconnected(&self) -> bool {
         self.shared.strong_count() == 0
     }
+
+    /// Returns [`Err(Disconnected)`] if the [`Player`] has disconnected
+    fn check_connection(&self) -> Result<(), Disconnected> {
+        if self.disconnected() {
+            Err(Disconnected)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Generic for Handle {
@@ -1055,7 +1101,12 @@ impl Generic for Handle {
         self.send(Message::Synchronize(wait_group.clone()))?;
         wait_group.wait();
         // check if the player has disconnected, since it could've between sending and waiting
-        (!self.disconnected()).then_some(()).ok_or(Disconnected)
+        self.check_connection()
+    }
+
+    fn supported_extensions(&self) -> Result<&ExtensionSet, Self::GetError> {
+        self.check_connection()?;
+        Ok(&self.supported_extensions)
     }
 }
 

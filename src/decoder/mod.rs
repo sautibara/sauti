@@ -28,7 +28,10 @@
 //! );
 //! ```
 
-use std::{default::Default as _, fmt::Debug, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, default::Default as _, ffi::OsStr, fmt::Debug, ops::BitOr, path::Path,
+    sync::Arc, time::Duration,
+};
 
 use thiserror::Error;
 
@@ -97,6 +100,12 @@ pub trait Decoder: Send + 'static {
                 reason: None,
             }))
     }
+
+    /// Get a [set](ExtensionSet) of all file extensions that this decoder can possibly decode.
+    ///
+    /// This does not mean that the decoder must be able to decode every file with this extension -
+    /// only that it may be able to.
+    fn supported_extensions(&self) -> ExtensionSet;
 }
 
 /// A decoded stream of audio
@@ -239,6 +248,103 @@ fn duration_div(num: Duration, denom: Duration) -> f64 {
     }
 }
 
+/// The maximum set of extensions that a specific [`Decoder`] can decode
+///
+/// This should list all extensions that the `Decoder` could decode, even if it can't decode every
+/// single file with that extension. It could be used to determine if a file looks like an audio
+/// file, for example.
+///
+/// # Examples
+///
+/// ```
+/// use sauti::decoder::ExtensionSet;
+/// use std::path::Path;
+///
+/// let set = ExtensionSet::from_slice(&["mp3", "flac"]);
+///
+/// assert!(set.contains("mp3"));
+/// assert!(!set.contains("txt"));
+///
+/// let path = Path::new("file.mp3");
+/// assert!(set.matches_path(&path));
+/// let path = Path::new("text.txt");
+/// assert!(!set.matches_path(&path));
+/// ```
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExtensionSet {
+    set: HashSet<String>,
+}
+
+impl ExtensionSet {
+    /// Build the [`ExtensionSet`] with no supported extensions
+    #[must_use]
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Build the [`ExtensionSet`] from a [`HashSet`] of possible extensions.
+    #[must_use]
+    pub const fn new(set: HashSet<String>) -> Self {
+        Self { set }
+    }
+
+    /// Build the [`ExtensionSet`] from a slice of possible extensions.
+    pub fn from_slice<S: AsRef<str>>(slice: &[S]) -> Self {
+        Self::from(slice)
+    }
+
+    /// Get a reference to the set of extensions that this represents
+    #[must_use]
+    pub const fn set(&self) -> &HashSet<String> {
+        &self.set
+    }
+
+    /// Returns `true` if `path`'s extension is contained within the set
+    #[must_use]
+    pub fn matches_path(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| self.contains(extension))
+    }
+
+    /// Returns `true` if `extension` is contained within the set
+    #[must_use]
+    pub fn contains(&self, extension: &str) -> bool {
+        self.set.contains(extension)
+    }
+}
+
+impl<S: AsRef<str>> From<&[S]> for ExtensionSet {
+    fn from(slice: &[S]) -> Self {
+        Self::new(
+            slice
+                .iter()
+                .map(AsRef::as_ref)
+                .map(ToString::to_string)
+                .collect(),
+        )
+    }
+}
+
+impl BitOr<&ExtensionSet> for &ExtensionSet {
+    type Output = ExtensionSet;
+
+    fn bitor(self, rhs: &ExtensionSet) -> Self::Output {
+        let set = &self.set | &rhs.set;
+        ExtensionSet { set }
+    }
+}
+
+pub(crate) fn default_extensions() -> ExtensionSet {
+    ExtensionSet::from_slice(&[
+        "mp3", "flac", "ogg", "oga", "opus", "aiff", "aif", "aifc", "mkv", "mka", "caf", "wav",
+        "mp1", "mp2", "pcm", "alac",
+        // mp4 and aac have issues currently, so these might have to be disabled
+        "mp4", "m4a", "m4b", "m4r", "aac",
+    ])
+}
+
 /// An iterator over packets returned by an [`AudioStream`]
 ///
 /// Obtained using [`AudioStreamExt::iter`]
@@ -318,6 +424,14 @@ impl Decoder for List {
         }
         Ok(None)
     }
+
+    fn supported_extensions(&self) -> ExtensionSet {
+        self.decoders
+            .iter()
+            .map(|decoder| decoder.supported_extensions())
+            .reduce(|left, right| &left | &right)
+            .unwrap_or_default()
+    }
 }
 
 /// Any error that can be occurred while decoding
@@ -328,7 +442,7 @@ pub enum DecoderError {
     #[error(
         "format of given {source} is not supported{}",
         reason.as_ref().map_or(
-            String::new(), 
+            String::new(),
             |reason| format!(": {reason}")
         ),
     )]
@@ -360,8 +474,12 @@ impl DecoderError {
     #[must_use]
     pub const fn log_level(&self) -> log::Level {
         match self {
-            Self::UnsupportedFormat { .. } | Self::MalformedData { .. }  | Self::NoTracks(_) => log::Level::Warn,
-            Self::IoError(_) | Self::SeekError { .. } | Self::SpecMismatch | Self::Other(_) => log::Level::Error,
+            Self::UnsupportedFormat { .. } | Self::MalformedData { .. } | Self::NoTracks(_) => {
+                log::Level::Warn
+            }
+            Self::IoError(_) | Self::SeekError { .. } | Self::SpecMismatch | Self::Other(_) => {
+                log::Level::Error
+            }
         }
     }
 }

@@ -115,6 +115,10 @@ impl Decoder for Empty {
     fn read(&self, _source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         Ok(Box::new(Self))
     }
+
+    fn supported_extensions(&self) -> crate::decoder::ExtensionSet {
+        crate::decoder::default_extensions()
+    }
 }
 
 #[cfg(feature = "decoder")]

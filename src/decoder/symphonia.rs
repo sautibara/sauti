@@ -162,6 +162,10 @@ impl Decoder for Symphonia {
 
         self.read_source(symphonia_source, error_source, &hint)
     }
+
+    fn supported_extensions(&self) -> super::ExtensionSet {
+        super::default_extensions()
+    }
 }
 
 use symphonia::core::codecs::Decoder as SymphoniaDecoder;

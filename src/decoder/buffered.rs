@@ -58,6 +58,10 @@ impl<D: super::Decoder> super::Decoder for Decoder<D> {
     fn read(&self, source: &MediaSource) -> DecoderResult<Box<dyn super::AudioStream>> {
         Ok(Box::new(AudioStream::wrap(self.decoder.read(source)?)))
     }
+
+    fn supported_extensions(&self) -> super::ExtensionSet {
+        self.decoder.supported_extensions()
+    }
 }
 
 /// A buffered [`AudioStream`](super::AudioStream)

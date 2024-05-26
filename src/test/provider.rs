@@ -52,6 +52,12 @@ impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> Decoder for Pro
     fn read(&self, _source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         Ok(Box::new(self.clone()))
     }
+
+    fn supported_extensions(&self) -> crate::decoder::ExtensionSet {
+        // defer to Empty for supported extensions
+        // it is supposed to have a good set of defaults
+        super::Empty.supported_extensions()
+    }
 }
 
 impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> AudioStream for Provider<I> {
