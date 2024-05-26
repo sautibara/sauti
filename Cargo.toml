@@ -25,6 +25,8 @@ thiserror = "1.0.53"
 [dev-dependencies]
 env_logger = "0.11.1"
 regex = "1.10.3"
+# this is a hack to ensure that these features are enabled in doc-tests
+sauti = { path = ".", features = ["player", "test"] }
 
 [lints.clippy]
 enum_glob_use = "warn"
@@ -36,7 +38,7 @@ default = ["player"]
 player = ["decoder", "effect", "output"]
 decoder = ["dep:symphonia"]
 effect = ["dep:rubato"]
-# cpal is not optional, as it's required for data
+# cpal cannot be optional, as it's required for data
 output = []
 test = []
 serde = ["dep:serde"]
