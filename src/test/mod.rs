@@ -30,18 +30,49 @@
 //! ```
 use crate::data::prelude::*;
 
+#[cfg(feature = "output")]
 mod collector;
+#[cfg(any(
+    feature = "output",
+    feature = "decoder",
+    feature = "effect",
+    feature = "player"
+))]
 mod empty;
+#[cfg(feature = "decoder")]
 mod provider;
 
+#[cfg(feature = "output")]
 pub use collector::Collector;
+#[cfg(feature = "output")]
 pub use collector::Handle as CollectorHandle;
+#[cfg(any(
+    feature = "output",
+    feature = "decoder",
+    feature = "effect",
+    feature = "player"
+))]
 pub use empty::Empty;
+#[cfg(feature = "decoder")]
 pub use provider::Provider;
 
+#[cfg(any(
+    feature = "output",
+    feature = "decoder",
+    feature = "effect",
+    feature = "player"
+))]
 pub mod prelude {
+    #[cfg(feature = "output")]
     pub use super::Collector;
+    #[cfg(any(
+        feature = "output",
+        feature = "decoder",
+        feature = "effect",
+        feature = "player"
+    ))]
     pub use super::Empty;
+    #[cfg(feature = "decoder")]
     pub use super::Provider;
 }
 

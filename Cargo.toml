@@ -29,4 +29,10 @@ pedantic = "warn"
 nursery = "warn"
 
 [features]
+default = ["player"]
+player = ["decoder", "effect", "output"]
+decoder = []
+effect = []
+output = []
+test = []
 serde = ["dep:serde"]

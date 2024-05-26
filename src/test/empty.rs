@@ -2,10 +2,15 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(feature = "decoder")]
 use crate::decoder::prelude::*;
-use crate::effect::Effect;
+#[cfg(feature = "effect")]
+use crate::effect::prelude::*;
+#[cfg(feature = "output")]
 use crate::output::prelude::*;
+#[cfg(feature = "player")]
 use crate::player::callback::prelude::*;
+#[cfg(feature = "player")]
 use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -32,6 +37,7 @@ impl Empty {
     /// # Ok(()) }
     /// ```
     #[must_use]
+    #[cfg(feature = "player")]
     pub fn player() -> crate::player::builder::Builder<Self, Self, Self, Self, Self> {
         Player::builder()
             .decoder(Self)
@@ -41,6 +47,7 @@ impl Empty {
             .on_stream_end(Self)
     }
 
+    #[cfg(feature = "output")]
     fn drain_source<S: SoundSource>(source: &S, info: DeviceInfo) {
         let mut sound = source.build(info);
         thread::spawn(move || {
@@ -56,6 +63,7 @@ impl Empty {
     }
 }
 
+#[cfg(feature = "output")]
 impl Output for Empty {
     fn start<S: SoundSource>(
         &self,
@@ -70,10 +78,12 @@ impl Output for Empty {
     }
 }
 
+#[cfg(feature = "output")]
 struct EmptyDevice {
     info: DeviceInfo,
 }
 
+#[cfg(feature = "output")]
 impl Device for EmptyDevice {
     fn info(&self) -> &DeviceInfo {
         &self.info
@@ -100,12 +110,14 @@ impl Device for EmptyDevice {
     }
 }
 
+#[cfg(feature = "decoder")]
 impl Decoder for Empty {
     fn read(&self, _source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         Ok(Box::new(Self))
     }
 }
 
+#[cfg(feature = "decoder")]
 impl AudioStream for Empty {
     fn next_packet(&mut self) -> DecoderResult<Option<GenericPacket>> {
         Ok(None)
@@ -140,6 +152,7 @@ impl AudioStream for Empty {
     }
 }
 
+#[cfg(feature = "decoder")]
 impl StreamTimes for Empty {
     fn duration(&self) -> Duration {
         Duration::ZERO
@@ -150,6 +163,7 @@ impl StreamTimes for Empty {
     }
 }
 
+#[cfg(feature = "effect")]
 impl Effect for Empty {
     fn apply_to<S: ConvertibleSample>(
         &mut self,
@@ -160,12 +174,14 @@ impl Effect for Empty {
     }
 }
 
+#[cfg(feature = "player")]
 impl OnError for Empty {
     fn handle(&self, _: PlayerError, _: PlayerRef) -> impl Into<callback::ActionSet> {
         None
     }
 }
 
+#[cfg(feature = "player")]
 impl OnStreamEnd for Empty {
     fn stream_ended(&self, _: callback::stream_end::Info<'_>) -> PlayerResult<()> {
         Ok(())

@@ -4,8 +4,9 @@
 //! potential errors (see [`Builder::on_error`](super::super::Builder::on_error)).
 //!
 //! The [`default`] is a [logged](Log) [`Recover`], which tries to recover the error as best
-//! as it can. For example, [`DecoderError::UnsupportedFormat`] returns [`Action::Stop`]
-//! instead of exiting the player.
+//! as it can. For example,
+//! [`DecoderError::UnsupportedFormat`](crate::decoder::DecoderError::UnsupportedFormat)
+//! returns [`Action::Stop`] instead of exiting the player.
 //!
 // TODO: example
 

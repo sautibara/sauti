@@ -4,6 +4,7 @@ use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::{cmp::Ordering, convert::identity, ops::Range};
 
+#[cfg(feature = "output")]
 use crate::output::DeviceInfo;
 
 /// An enum representing the acceptable sound sample types
@@ -150,6 +151,7 @@ impl Default for StreamSpec {
     }
 }
 
+#[cfg(feature = "output")]
 impl From<DeviceInfo> for StreamSpec {
     fn from(value: DeviceInfo) -> Self {
         Self {
