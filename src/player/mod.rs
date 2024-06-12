@@ -674,15 +674,16 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
     }
 
     fn stop(&mut self) -> PlayerResult<()> {
+        if let Some(stream) = self.decoder.stream() {
+            // only emit StreamEnded if a file actually stopped being decoded
+            self.stream_ended(stream.source().clone(), callback::stream_end::Reason::Stop)?;
+        }
         self.device.pause()?;
         *(self.shared.times)
             .write()
             .expect("times should not be poisoned") = None;
         // stop the decoder by taking out the stream
-        if let Some(stream) = self.decoder.stop() {
-            // only emit StreamEnded if a file actually stopped being decoded
-            self.stream_ended(stream.source().clone(), callback::stream_end::Reason::Stop)?;
-        }
+        self.decoder.stop();
         Ok(())
     }
 
@@ -740,8 +741,15 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE,
     type GetError = Infallible;
 
     fn play(&mut self, source: &MediaSource) -> PlayerResult<()> {
-        // take out the previous one
-        let prev = self.decoder.stop();
+        // notify that we're replacing a song if it exists
+        if let Some(stream) = self.decoder.stream() {
+            self.stream_ended(
+                stream.source().clone(),
+                callback::stream_end::Reason::Replaced,
+            )?;
+        }
+        // take out the previous song
+        self.decoder.stop();
         // start playing a new one
         self.decoder.decode(source)?;
         // flush the packets from the previous song
@@ -754,13 +762,6 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE,
                 .write()
                 .expect("times should not be poisoned");
             *times = Some(stream.times());
-        }
-        // notify that the previous one stopped if it did
-        if let Some(prev) = prev {
-            self.stream_ended(
-                prev.source().clone(),
-                callback::stream_end::Reason::Replaced,
-            )?;
         }
         Ok(())
     }

@@ -234,6 +234,38 @@ pub trait StreamTimes: Send + Sync {
     fn progress(&self) -> f64 {
         duration_div(self.position(), self.duration())
     }
+    /// Get a snapshot of the current times of the stream
+    ///
+    /// Although it derives [`StreamTimes`], it is not actually synchronized
+    fn snapshot(&self) -> StreamTimesSnapshot {
+        StreamTimesSnapshot {
+            position: self.position(),
+            duration: self.duration(),
+        }
+    }
+}
+
+/// An **unsynchronized** snapshot of a stream's current times
+///
+/// Notice that although this implements [`StreamTimes`], it is not actually synchronized to the
+/// stream
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StreamTimesSnapshot {
+    position: Duration,
+    duration: Duration,
+}
+
+impl StreamTimes for StreamTimesSnapshot {
+    fn position(&self) -> Duration {
+        self.position
+    }
+    fn duration(&self) -> Duration {
+        self.duration
+    }
+    fn snapshot(&self) -> StreamTimesSnapshot {
+        *self
+    }
 }
 
 // the durations would never get that large

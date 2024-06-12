@@ -65,6 +65,9 @@ pub trait OnStreamEnd: Send + 'static {
     /// [`Generic::stop`](super::Generic::stop) when `info.reason == Reason::FileEnded`
     /// in this.
     ///
+    /// Notably, this callback is run before the stream is stopped decoding. This allows methods
+    /// like [`Generic::times`] to be run on the previous stream.
+    ///
     /// Errors passed up in the return value are delegated to the player to handle.
     ///
     /// # Errors
