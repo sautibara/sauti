@@ -101,7 +101,8 @@ pub struct Info<'a> {
     pub player: PlayerRef<'a>,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Reason {
     #[error("it was stopped")]
     Stop,
