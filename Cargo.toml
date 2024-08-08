@@ -28,11 +28,6 @@ regex = "1.10.3"
 # this is a hack to ensure that these features are enabled in doc-tests
 sauti = { path = ".", features = ["player", "test"] }
 
-[lints.clippy]
-enum_glob_use = "warn"
-pedantic = "warn"
-nursery = "warn"
-
 [features]
 default = ["player"]
 player = ["decoder", "effect", "output"]
@@ -42,3 +37,8 @@ effect = ["dep:rubato"]
 output = []
 test = []
 serde = ["dep:serde"]
+
+[lints.clippy]
+enum_glob_use = "warn"
+pedantic = "warn"
+nursery = "warn"
