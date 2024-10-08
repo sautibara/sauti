@@ -296,7 +296,7 @@ pub trait Generic {
     /// - [`Handle`]: If the player disconnected
     fn times(&self) -> Result<Option<Arc<dyn StreamTimes>>, Self::GetError>;
 
-    /// Block this thread until all previous messages have been recieved
+    /// Block this thread until all previous messages have been received
     ///
     /// # Examples
     ///
@@ -540,12 +540,12 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
         let (packet_sender, packet_receiver) = crossbeam_channel::bounded(8);
         // output control is a rendevous to make sure that the decoder and audio player is on the
         // same page at all times
-        let (output_control, output_control_reciever) = crossbeam_channel::bounded(0);
+        let (output_control, output_control_receiver) = crossbeam_channel::bounded(0);
 
         let source = PacketPlayer::new(
             &self,
             packet_receiver,
-            output_control_reciever,
+            output_control_receiver,
             self.shared.volume.load(),
         );
         let device = self.output.start_paused(self.options.clone(), source)?;
@@ -906,7 +906,7 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'a, D, OE, OS
 /// // the handle can be used to control the player, so start playing an imaginary file
 /// // [`Empty`] ignores the [`MediaSource`], so just send an empty path
 /// handle.play("")?;
-/// // it may take a bit for the player to recieve the message, so wait for it
+/// // it may take a bit for the player to receive the message, so wait for it
 /// handle.synchronize();
 /// // once the player starts playing, it changes to [`PlayState::Playing`]
 /// assert_eq!(handle.play_state()?, PlayState::Playing);

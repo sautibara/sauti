@@ -43,7 +43,7 @@ impl<E: Effect> SoundSource for PacketPlayer<E> {
             current_index: 0,
             spec: info.into(),
             last_frames: None,
-            // the player starts out paused until it recieves a song to play
+            // the player starts out paused until it receives a song to play
             playing: false,
         }
     }
@@ -83,7 +83,7 @@ impl<E: Effect, S: ConvertibleSample> Sound<S> for PacketSound<E, S> {
                 }
                 // there was a packet, but it has no frames
                 Ok(_) => {
-                    warn!("packet recieved had no frames");
+                    warn!("packet received had no frames");
                     channels.fill(S::EQUILIBRIUM);
                     self.current_packet = None;
                 }
@@ -126,9 +126,9 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
     // This is essentially a call of get_or_insert, but it couldn't be used. The lifetimes of
     // &self.current_packet and &mut self would interfere, and there's a chance of of an
     // AudioControl coming up.
-    /// Get the current packet if it is [`Some`], or wait to recieve a new packet if it is
+    /// Get the current packet if it is [`Some`], or wait to receive a new packet if it is
     /// [`None`]. This also returns the current index of the packet, as it may be reset when a
-    /// packet is recieved.
+    /// packet is received.
     fn packet(&mut self) -> Result<(&SoundPacket<S>, usize), OutputControl> {
         if self.current_packet.is_none() {
             let packet = self.next_packet()?;

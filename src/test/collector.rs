@@ -15,21 +15,21 @@ pub struct Collector {
 impl Collector {
     #[must_use]
     pub fn take(amount: usize) -> (Self, Handle) {
-        let (sender, reciever) = crossbeam_channel::bounded(0);
+        let (sender, receiver) = crossbeam_channel::bounded(0);
         (
             Self {
                 sender,
                 take: amount,
             },
-            Handle { reciever },
+            Handle { receiver },
         )
     }
 }
 
-/// A handle for a [`Collector`] that can be used to recieve the collected packet through
+/// A handle for a [`Collector`] that can be used to receive the collected packet through
 /// [`Self::collect`]
 pub struct Handle {
-    reciever: Receiver<GenericPacket>,
+    receiver: Receiver<GenericPacket>,
 }
 
 impl Handle {
@@ -40,7 +40,7 @@ impl Handle {
     /// - If the audio output hangs up before recieving enough frames
     #[must_use]
     pub fn collect(self) -> GenericPacket {
-        self.reciever
+        self.receiver
             .recv()
             .expect("output hung up without sending a packet")
     }

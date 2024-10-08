@@ -15,7 +15,7 @@
 //! struct Exit;
 //!
 //! // A channel that exits the program when a message is sent
-//! let (sender, reciever) = crossbeam_channel::bounded(0);
+//! let (sender, receiver) = crossbeam_channel::bounded(0);
 //! // An [`Empty`] player does nothing with its data
 //! let player = Empty::player()
 //!     // Once the stream ends, tell the main thread to exit
@@ -31,7 +31,7 @@
 //! player.play("")?;
 //!
 //! // When decoding a file, [`Empty`] returns None, so the file will end immediately.
-//! let res = reciever.recv_timeout(Duration::from_secs(1));
+//! let res = receiver.recv_timeout(Duration::from_secs(1));
 //! // If the player takes too long, then it'll return Err
 //! assert!(res.is_ok(), "empty player should end immediately");
 //!
