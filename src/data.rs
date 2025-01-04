@@ -322,11 +322,11 @@ impl<S: ConvertibleSample> From<SoundPacket<S>> for GenericPacket {
 ///
 /// Terminology:
 /// - A `sample` is any single value representing sound - it represents the compression or
-/// expansion of the air
+///   expansion of the air
 /// - A `channel` is a list of samples coming from a single direction - there's usually one for
-/// each ear (stereo)
+///   each ear (stereo)
 /// - A `frame` represents a single instance in time, combining each channel's current sample
-/// together
+///   together
 ///
 /// The packet also includes a [`StreamSpec`] that holds information about the stream (most notably
 /// its sample rate)

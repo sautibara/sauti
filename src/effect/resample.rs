@@ -20,7 +20,7 @@ use super::prelude::*;
 ///
 /// - If the input amount of channels is different than the output
 ///     - [`ResizeChannels`](super::effect::ResizeChannels) or some equivalent should probably be
-///     used before this
+///       used before this
 pub struct Resample {
     ratio: f64,
     resampler: Option<Inner>,

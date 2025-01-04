@@ -581,7 +581,7 @@ struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
     supported_extensions: &'a ExtensionSet,
 }
 
-impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
+impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'_, D, OE, OSE> {
     fn run_blocking(&mut self, start_playing: bool) {
         let res = self.run_blocking_fallible(start_playing);
         assert!(res.is_break());
@@ -736,7 +736,7 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'a, D, OE, OSE> {
     }
 }
 
-impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE, OSE> {
+impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'_, D, OE, OSE> {
     type ModifyError = PlayerError;
     type GetError = Infallible;
 
@@ -872,7 +872,7 @@ impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'a, D, OE,
     }
 }
 
-impl<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'a, D, OE, OSE> {
+impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'_, D, OE, OSE> {
     fn drop(&mut self) {
         // Stop output before dropping, since the sound source expects the output_control sender
         // to never be disconnected. By stopping it, the sound source never looks at the sender.

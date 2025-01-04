@@ -114,7 +114,7 @@ impl<E: Effect, S: ConvertibleSample> PacketSound<E, S> {
     }
 
     fn detect_frame_change(&mut self, current: usize) {
-        if !self.last_frames.is_some_and(|last| last == current) {
+        if self.last_frames.is_none_or(|last| last != current) {
             debug!(
                 "packet frame count change detected. last: {:?}, current: {current:?}",
                 self.last_frames

@@ -165,7 +165,7 @@ pub trait DeviceExt: Deref<Target = dyn Device> {
     /// # Errors
     ///
     /// - If the new options don't work, then [`OutputError::DeviceOptionsNotSupported`] will be
-    /// raised
+    ///   raised
     /// - Other errors can occur while [restarting](Device::restart)
     fn merge_options(&mut self, options: DeviceOptions) -> OutputResult<()>;
     /// Add onto this device's current options with `options` and then restart.

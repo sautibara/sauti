@@ -103,7 +103,7 @@ impl<E: EffectSupplier, N: EffectSupplier> EffectSupplier for EffectListSupplier
 ///
 /// - Call [`Self::run`] to build the player, run it in a separate thread, and return the handle
 /// - Call [`Self::build`] to build the player and give both it and its handle back, without
-/// running it
+///   running it
 ///
 /// This takes in [suppliers](DecoderSupplier) that lazily provide a way to obtain each component.
 /// These are eventually consumed when the builder is [run](Self::run) or [built](Self::build).
