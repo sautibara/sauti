@@ -39,10 +39,7 @@ struct Beep {
 impl SoundSource for Beep {
     // the sound source is generic over the sample type
     #[allow(clippy::cast_precision_loss)] // the sample rate shouldn't be too big to fit in an f64
-    fn build<S: ConvertibleSample>(
-        &self,
-        info: DeviceInfo,
-    ) -> impl FnMut(&mut [S]) + Send + Sync + 'static {
+    fn build<S: ConvertibleSample>(&self, info: DeviceInfo) -> impl Sound<S> {
         // config from the source can be passed in
         let frequency = self.frequency;
         let volume = self.volume;
@@ -51,7 +48,7 @@ impl SoundSource for Beep {
 
         // this closure is run for each sample to get the values
         // it's given a mutable slice `channels` that holds each channel of the current sample
-        move |channels| {
+        move |channels: &mut [S]| {
             clock = (clock + 1) % info.sample_rate;
             let val =
                 (clock as f64 * frequency * std::f64::consts::TAU / info.sample_rate as f64).sin();
