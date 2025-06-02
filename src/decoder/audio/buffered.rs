@@ -34,7 +34,7 @@
 //! );
 //! # Ok(()) }
 //! ```
-use super::prelude::*;
+use crate::decoder::audio::prelude::*;
 
 /// A buffered [`Decoder`](super::Decoder)
 ///
@@ -59,7 +59,7 @@ impl<D: super::Decoder> super::Decoder for Decoder<D> {
         Ok(Box::new(AudioStream::wrap(self.decoder.read(source)?)))
     }
 
-    fn supported_extensions(&self) -> super::ExtensionSet {
+    fn supported_extensions(&self) -> ExtensionSet {
         self.decoder.supported_extensions()
     }
 }

@@ -1,7 +1,7 @@
 use crossbeam_channel::{select, Receiver};
 use log::{debug, warn};
 
-use crate::decoder::Decoder;
+use crate::decoder::audio::Decoder;
 use crate::effect::prelude::*;
 use crate::{effect::List, output::prelude::*};
 

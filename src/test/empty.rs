@@ -3,7 +3,8 @@ use std::thread;
 use std::time::Duration;
 
 #[cfg(feature = "decoder")]
-use crate::decoder::prelude::*;
+use crate::decoder::audio::prelude::*;
+use crate::decoder::ExtensionSet;
 #[cfg(feature = "effect")]
 use crate::effect::prelude::*;
 #[cfg(feature = "output")]
@@ -15,7 +16,7 @@ use crate::player::prelude::*;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 
-/// Provides implementations for [`Output`], [`Decoder`], [`Effect`], [`OnStreamEnd`], and [`OnError`] that all do nothing
+/// Provides implementations for [`Output`], [`AudioDecoder`], [`Effect`], [`OnStreamEnd`], and [`OnError`] that all do nothing
 #[derive(Clone, Copy)]
 pub struct Empty;
 
@@ -111,13 +112,18 @@ impl Device for EmptyDevice {
 }
 
 #[cfg(feature = "decoder")]
-impl Decoder for Empty {
+impl AudioDecoder for Empty {
     fn read(&self, _source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         Ok(Box::new(Self))
     }
 
-    fn supported_extensions(&self) -> crate::decoder::ExtensionSet {
-        crate::decoder::default_extensions()
+    fn supported_extensions(&self) -> ExtensionSet {
+        ExtensionSet::from_slice(&[
+            "mp3", "flac", "ogg", "oga", "opus", "aiff", "aif", "aifc", "mkv", "mka", "caf", "wav",
+            "mp1", "mp2", "pcm", "alac",
+            // mp4 and aac have issues currently, so these might have to be disabled
+            "mp4", "m4a", "m4b", "m4r", "aac",
+        ])
     }
 }
 
@@ -134,7 +140,7 @@ impl AudioStream for Empty {
     fn seek_by(
         &mut self,
         _duration: std::time::Duration,
-        _direction: crate::decoder::Direction,
+        _direction: crate::decoder::audio::Direction,
     ) -> DecoderResult<()> {
         Ok(())
     }

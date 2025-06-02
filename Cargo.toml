@@ -6,21 +6,30 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cpal = "0.15.2"
+# general
 crossbeam = "0.8.4"
 crossbeam-channel = "0.5.11"
-dasp_sample = "0.11.0"
 flagset = "0.4.5"
-itertools = "0.13.0"
 log = "0.4.20"
-paste = "1.0.14"
-rubato = { version = "0.15.0", optional = true }
+itertools = "0.13.0"
 serde = { version = "1.0.197", optional = true }
+thiserror = "1.0.53"
+# macros
+paste = "1.0.14"
+# output / data
+cpal = "0.15.2"
+dasp_sample = "0.11.0"
+# effect
+rubato = { version = "0.15.0", optional = true }
+# audio decoding
 symphonia = { version = "0.5.3", features = [
   "all",
   "opt-simd",
 ], optional = true }
-thiserror = "1.0.53"
+# metadata decoding
+metaflac = "0.2.8"
+id3 = "1.16.2"
+mp4ameta = "0.12.1"
 
 [dev-dependencies]
 env_logger = "0.11.1"
@@ -29,12 +38,14 @@ regex = "1.10.3"
 sauti = { path = ".", features = ["player", "test"] }
 
 [features]
-default = ["player"]
-player = ["decoder", "effect", "output"]
+# TODO: remove this from default features
+default = ["player", "metadata-decoder"]
+player = ["audio-decoder", "effect", "output"]
 decoder = ["dep:symphonia"]
+audio-decoder = ["decoder"]
+metadata-decoder = ["decoder"]
 effect = ["dep:rubato"]
-# cpal cannot be optional, as it's required for data
-output = []
+output = [] # cpal cannot be optional, as it's required for data
 test = []
 serde = ["dep:serde"]
 

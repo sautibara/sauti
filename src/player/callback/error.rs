@@ -5,7 +5,7 @@
 //!
 //! The [`default`] is a [logged](Log) [`Recover`], which tries to recover the error as best
 //! as it can. For example,
-//! [`DecoderError::UnsupportedFormat`](crate::decoder::DecoderError::UnsupportedFormat)
+//! [`DecoderError::UnsupportedFormat`](crate::decoder::audio::DecoderError::UnsupportedFormat)
 //! returns [`Action::Stop`] instead of exiting the player.
 //!
 // TODO: example

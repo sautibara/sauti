@@ -11,7 +11,7 @@ pub mod player;
 pub mod test;
 
 #[cfg(feature = "decoder")]
-pub use decoder::Decoder;
+pub use decoder::audio::Decoder;
 #[cfg(feature = "output")]
 pub use output::Output;
 #[cfg(feature = "player")]

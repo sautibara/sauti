@@ -125,12 +125,12 @@ impl<E: Effect, N: Effect> Effect for List<E, N> {
 
 impl<E: Effect, N: Effect> List<E, N> {
     /// Mutate the current effect
-    pub fn current(&mut self) -> &mut E {
+    pub const fn current(&mut self) -> &mut E {
         &mut self.current
     }
 
     /// Mutate the next effect
-    pub fn after(&mut self) -> &mut N {
+    pub const fn after(&mut self) -> &mut N {
         &mut self.next
     }
 }

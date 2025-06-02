@@ -14,7 +14,7 @@ use super::prelude::*;
 /// The current implementation uses [`rubato`]. This means that whenever the input or output
 /// [`StreamSpec`]s or the amount of frames in the input [`SoundPacket`] changes, the
 /// resampler has to be remade, which is often fairly intensive. As such, it relies on the
-/// [`Decoder`](crate::decoder::Decoder) to provide consistently-sized packets.
+/// [`AudioDecoder`](crate::decoder::AudioDecoder) to provide consistently-sized packets.
 ///
 /// # Panics
 ///

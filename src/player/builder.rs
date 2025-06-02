@@ -40,7 +40,7 @@
 //! assert!(res.is_ok(), "empty player should end immediately");
 //! ```
 use crate::{
-    decoder::Decoder,
+    decoder::audio::Decoder,
     effect::{Effect, List},
     output::{DeviceOptions, Output},
 };
@@ -80,7 +80,7 @@ macro_rules! impl_supplier {
     };
 }
 
-impl_supplier!(prefix: crate::decoder, trait: Decoder, a: a);
+impl_supplier!(prefix: crate::decoder::audio, trait: Decoder, a: a);
 impl_supplier!(prefix: crate::effect, trait: Effect, a: an);
 impl_supplier!(prefix: crate::output, trait: Output, a: an);
 

@@ -2,7 +2,7 @@ use crossbeam_channel::Sender;
 
 use super::callback::prelude::*;
 use super::prelude::*;
-use crate::{decoder::prelude::*, effect::Effect, output::Output};
+use crate::{decoder::audio::prelude::*, effect::Effect, output::Output};
 
 pub enum NoPacket {
     NoStream,
@@ -21,13 +21,13 @@ impl NoPacket {
 
 // it conflicts with the other decoder module
 #[allow(clippy::module_name_repetitions)]
-pub struct PlayerDecoder<'a, D: Decoder> {
+pub struct PlayerDecoder<'a, D: AudioDecoder> {
     packet_sender: Sender<GenericPacket>,
     decoder: &'a D,
     current_stream: Option<Box<dyn AudioStream>>,
 }
 
-impl<'a, D: Decoder> PlayerDecoder<'a, D> {
+impl<'a, D: AudioDecoder> PlayerDecoder<'a, D> {
     pub fn new<O: Output, E: Effect, OE: OnError, OSE: OnStreamEnd>(
         player: &'a Player<O, D, E, OE, OSE>,
         packet_sender: Sender<GenericPacket>,

@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use crate::decoder::prelude::*;
+use crate::decoder::{audio::prelude::*, ExtensionSet};
 
 use super::Empty;
 
@@ -48,12 +48,12 @@ impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> Provider<I> {
     }
 }
 
-impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> Decoder for Provider<I> {
+impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> AudioDecoder for Provider<I> {
     fn read(&self, _source: &MediaSource) -> DecoderResult<Box<dyn AudioStream>> {
         Ok(Box::new(self.clone()))
     }
 
-    fn supported_extensions(&self) -> crate::decoder::ExtensionSet {
+    fn supported_extensions(&self) -> ExtensionSet {
         // defer to Empty for supported extensions
         // it is supposed to have a good set of defaults
         super::Empty.supported_extensions()
@@ -72,7 +72,7 @@ impl<I: Iterator<Item = GenericPacket> + Clone + Send + 'static> AudioStream for
     fn seek_by(
         &mut self,
         _duration: std::time::Duration,
-        _direction: crate::decoder::Direction,
+        _direction: crate::decoder::audio::Direction,
     ) -> DecoderResult<()> {
         Ok(())
     }

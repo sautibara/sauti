@@ -16,7 +16,10 @@ use symphonia::core::{
 
 // FIXME: find out why AAC doesn't work
 
-use super::{prelude::*, SeekError, SourceName};
+use super::{
+    audio::{prelude::*, SeekError},
+    ExtensionSet, SourceName,
+};
 
 pub struct Symphonia {
     probe: Probe,
@@ -143,8 +146,8 @@ impl Symphonia {
     }
 }
 
-impl Decoder for Symphonia {
-    fn read(&self, source: &MediaSource) -> super::DecoderResult<Box<dyn super::AudioStream>> {
+impl AudioDecoder for Symphonia {
+    fn read(&self, source: &MediaSource) -> DecoderResult<Box<dyn super::audio::AudioStream>> {
         let error_source = source.into();
         let mut hint = Hint::new();
 
@@ -163,8 +166,13 @@ impl Decoder for Symphonia {
         self.read_source(symphonia_source, error_source, &hint)
     }
 
-    fn supported_extensions(&self) -> super::ExtensionSet {
-        super::default_extensions()
+    fn supported_extensions(&self) -> ExtensionSet {
+        ExtensionSet::from_slice(&[
+            "mp3", "flac", "ogg", "oga", "opus", "aiff", "aif", "aifc", "mkv", "mka", "caf", "wav",
+            "mp1", "mp2", "pcm", "alac",
+            // mp4 and aac have issues currently, so these might have to be disabled
+            "mp4", "m4a", "m4b", "m4r", "aac",
+        ])
     }
 }
 

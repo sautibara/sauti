@@ -63,7 +63,7 @@ pub mod prelude {
         Handle as PlayerHandle, PlayState, Player, PlayerError, PlayerResult,
     };
     pub use crate::data::prelude::*;
-    pub use crate::decoder::Direction;
+    pub use crate::decoder::audio::Direction;
     pub use crate::effect::prelude::*;
     pub use crate::output::DeviceOptions;
     pub use crate::player;
@@ -74,7 +74,6 @@ use std::convert::Infallible;
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock, Weak};
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
 use crossbeam::sync::WaitGroup;
@@ -82,10 +81,13 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use log::error;
 use thiserror::Error;
 
-use crate::decoder::{prelude::*, Direction, ExtensionSet, SeekError};
+use crate::decoder::audio::SeekError;
+use crate::decoder::{audio::prelude::*, ExtensionSet};
 use crate::effect::prelude::*;
 use crate::output::prelude::*;
 use callback::prelude::*;
+
+use prelude::*;
 
 use self::builder::{
     Builder, DecoderSupplier, DefaultDecoder, DefaultEffect, DefaultOutput, EffectSupplier,
@@ -441,7 +443,7 @@ impl Shared {
 
 /// A single-track sound file player
 ///
-/// The player routes sound packets obtained through the [`Decoder`] to the [`Output`] audio,
+/// The player routes sound packets obtained through the [`AudioDecoder`] to the [`Output`] audio,
 /// applying an [`Effect`] if given. The player may also run a custom callback for when a file ends
 /// through [`OnStreamEnd`] or when an error occurs through [`OnError`].
 ///
@@ -449,7 +451,7 @@ impl Shared {
 ///
 /// The player automatically exits when every [`Handle`] goes out of scope
 #[must_use = "Player doesn't do anything unless it's run"]
-pub struct Player<O: Output, D: Decoder, E: Effect, OE: OnError, OSE: OnStreamEnd> {
+pub struct Player<O: Output, D: AudioDecoder, E: Effect, OE: OnError, OSE: OnStreamEnd> {
     handle: Receiver<Message>,
     output: O,
     decoder: D,
@@ -465,7 +467,7 @@ pub struct Player<O: Output, D: Decoder, E: Effect, OE: OnError, OSE: OnStreamEn
 impl
     Player<
         crate::output::Default,
-        crate::decoder::Default,
+        crate::decoder::audio::Default,
         crate::effect::Default,
         callback::error::Default,
         callback::stream_end::Default,
@@ -484,7 +486,9 @@ impl
     }
 }
 
-impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, D, E, OE, OSE> {
+impl<D: AudioDecoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd>
+    Player<O, D, E, OE, OSE>
+{
     fn new<
         OS: OutputSupplier<Out = O>,
         DS: DecoderSupplier<Out = D>,
@@ -511,7 +515,7 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
                 supported_extensions: supported_extensions.clone(),
             },
             Handle {
-                handle: sender,
+                sender,
                 shared: weak,
                 supported_extensions,
             },
@@ -569,7 +573,7 @@ impl<D: Decoder, E: Effect, O: Output, OE: OnError, OSE: OnStreamEnd> Player<O, 
 }
 
 #[allow(clippy::struct_field_names)] // "play state" is its own thing
-struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
+struct Inner<'a, D: AudioDecoder, OE: OnError, OSE: OnStreamEnd> {
     play_state: PlayState,
     device: Box<dyn Device>,
     decoder: PlayerDecoder<'a, D>,
@@ -581,7 +585,7 @@ struct Inner<'a, D: Decoder, OE: OnError, OSE: OnStreamEnd> {
     supported_extensions: &'a ExtensionSet,
 }
 
-impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'_, D, OE, OSE> {
+impl<D: AudioDecoder, OE: OnError, OSE: OnStreamEnd> Inner<'_, D, OE, OSE> {
     fn run_blocking(&mut self, start_playing: bool) {
         let res = self.run_blocking_fallible(start_playing);
         assert!(res.is_break());
@@ -736,7 +740,7 @@ impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Inner<'_, D, OE, OSE> {
     }
 }
 
-impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'_, D, OE, OSE> {
+impl<D: AudioDecoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'_, D, OE, OSE> {
     type ModifyError = PlayerError;
     type GetError = Infallible;
 
@@ -872,7 +876,7 @@ impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Generic for Inner<'_, D, OE, OSE
     }
 }
 
-impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'_, D, OE, OSE> {
+impl<D: AudioDecoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'_, D, OE, OSE> {
     fn drop(&mut self) {
         // Stop output before dropping, since the sound source expects the output_control sender
         // to never be disconnected. By stopping it, the sound source never looks at the sender.
@@ -920,7 +924,7 @@ impl<D: Decoder, OE: OnError, OSE: OnStreamEnd> Drop for Inner<'_, D, OE, OSE> {
 /// ```
 #[derive(Clone)]
 pub struct Handle {
-    handle: Sender<Message>,
+    sender: Sender<Message>,
     // TODO: measure the cost of using Weak instead of Arc
     shared: Weak<Shared>,
     supported_extensions: Arc<ExtensionSet>,
@@ -947,7 +951,7 @@ impl From<Infallible> for PlayerError {
 #[allow(clippy::missing_errors_doc)]
 impl Handle {
     fn send(&self, message: Message) -> Result<(), Disconnected> {
-        self.handle.send(message).map_err(|_| Disconnected)
+        self.sender.send(message).map_err(|_| Disconnected)
     }
 
     /// Make the player start playing `source`
