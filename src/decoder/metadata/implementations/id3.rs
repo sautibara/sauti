@@ -67,23 +67,43 @@ fn convert_sauti_to_id3_id(id: FrameId) -> Id {
     }
 }
 
-fn convert_sauti_to_id3_data(data: DataOpt) -> Option<id3::Content> {
-    match data.into_option() {
-        None | Some(Data::Unsupported { .. }) => None,
-        Some(Data::Text(string)) => Some(id3::Content::Text(string)),
-        Some(Data::Link(string)) => Some(id3::Content::Link(string)),
-        Some(Data::Picture(picture)) => {
+fn convert_sauti_to_id3_data(data: Data) -> Result<id3::Content, Data> {
+    match data {
+        unsupported @ Data::Unsupported { .. } => Err(unsupported),
+        Data::Text(string) => Ok(id3::Content::Text(string)),
+        Data::Link(string) => Ok(id3::Content::Link(string)),
+        Data::Picture(picture) => {
             let picture = convert_sauti_to_id3_picture(picture, id3::frame::PictureType::Other);
-            Some(id3::Content::Picture(picture))
+            Ok(id3::Content::Picture(picture))
         }
-        Some(Data::InvolvedPeople(ipl)) => {
+        Data::InvolvedPeople(ipl) => {
             let ipl = convert_sauti_to_id3_ipl(ipl);
-            Some(id3::Content::InvolvedPeopleList(ipl))
+            Ok(id3::Content::InvolvedPeopleList(ipl))
         }
-        Some(Data::Object(object)) => {
+        Data::Object(object) => {
             let object = convert_sauti_to_id3_object(object, "unknown");
-            Some(id3::Content::EncapsulatedObject(object))
+            Ok(id3::Content::EncapsulatedObject(object))
         }
+    }
+}
+
+fn convert_id3_to_sauti_data_owned(content: id3::Content) -> Data {
+    match content {
+        Content::Text(string)
+        | Content::ExtendedText(id3::frame::ExtendedText { value: string, .. }) => {
+            Data::Text(string)
+        }
+        Content::Link(string)
+        | Content::ExtendedLink(id3::frame::ExtendedLink { link: string, .. }) => {
+            Data::Link(string)
+        }
+        Content::Picture(picture) => Data::Picture(convert_id3_to_sauti_picture_owned(picture)),
+        Content::InvolvedPeopleList(list) => {
+            Data::InvolvedPeople(convert_id3_to_sauti_ipl_owned(list))
+        }
+        other => Data::Unsupported {
+            reason: Some(format!("unsupported id3 content: {other:?}")),
+        },
     }
 }
 
@@ -187,6 +207,20 @@ fn convert_id3_to_sauti_picture(from: &id3::frame::Picture) -> PictureRef<'_> {
     }
 }
 
+fn convert_id3_to_sauti_picture_owned(from: id3::frame::Picture) -> Picture {
+    let id3::frame::Picture {
+        mime_type,
+        description,
+        data,
+        ..
+    } = from;
+    Picture {
+        mime_type,
+        description,
+        data,
+    }
+}
+
 fn convert_sauti_to_id3_picture(
     from: Picture,
     picture_type: id3::frame::PictureType,
@@ -270,6 +304,18 @@ fn convert_id3_to_iter_ipl(
         name: &item.involvee,
         involvement: &item.involvement,
     })
+}
+
+fn convert_id3_to_sauti_ipl_owned(ipl: id3::frame::InvolvedPeopleList) -> InvolvedPeople {
+    let list = ipl
+        .items
+        .into_iter()
+        .map(|item| InvolvedPerson {
+            name: item.involvee,
+            involvement: item.involvement,
+        })
+        .collect();
+    InvolvedPeople(list)
 }
 
 fn convert_sauti_to_id3_ipl(ipl: InvolvedPeople) -> id3::frame::InvolvedPeopleList {
@@ -441,25 +487,106 @@ impl super::super::Tag for Tag {
         }
     }
 
-    fn set(&mut self, id: FrameId, data: DataOpt) {
-        match (convert_sauti_to_id3_id(id), convert_sauti_to_id3_data(data)) {
-            (Id::Text(ident), Some(content @ (Content::Text(_) | Content::Link(_)))) => {
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        let res = match (
+            convert_sauti_to_id3_id(id.clone()),
+            convert_sauti_to_id3_data(data),
+        ) {
+            (Id::Text(ident), Ok(content @ (Content::Text(_) | Content::Link(_)))) => {
                 self.tag.add_frame(id3::Frame::with_content(ident, content));
+                Ok(())
             }
-            (Id::Text(ident), _) => {
-                self.tag.remove(ident);
-            }
-            (Id::Picture(picture_type), Some(Content::Picture(mut picture))) => {
+            (Id::Picture(picture_type), Ok(Content::Picture(mut picture))) => {
                 picture.picture_type = picture_type;
                 self.tag.add_frame(picture);
+                Ok(())
             }
-            (Id::Picture(picture_type), _) => {
+            (Id::InvolvedPeople, Ok(Content::InvolvedPeopleList(ipl))) => {
+                self.tag.add_frame(ipl);
+                Ok(())
+            }
+            (Id::CustomText(description), Ok(Content::Text(value) | Content::Link(value))) => {
+                self.tag.add_frame(id3::frame::ExtendedText {
+                    description: description.to_string(),
+                    value,
+                });
+                Ok(())
+            }
+            (Id::CustomLink(description), Ok(Content::Text(link) | Content::Link(link))) => {
+                self.tag.add_frame(id3::frame::ExtendedLink {
+                    description: description.to_string(),
+                    link,
+                });
+                Ok(())
+            }
+            (Id::Object(description), Ok(Content::EncapsulatedObject(mut object))) => {
+                object.description = description.to_string();
+                self.tag.add_frame(object);
+                Ok(())
+            }
+            (Id::Unknown(id), Ok(content)) => {
+                self.tag.add_frame(id3::Frame::with_content(id, content));
+                Ok(())
+            }
+            (Id::Text(_) | Id::CustomText(_) | Id::CustomLink(_), content @ Ok(_)) => {
+                Err(("expected Data::Text or Data::Link", content))
+            }
+            (Id::Picture(_), content @ Ok(_)) => Err(("expected Data::Picture", content)),
+            (Id::InvolvedPeople, content @ Ok(_)) => {
+                Err(("expected Data::InvolvedPeople", content))
+            }
+            (Id::Object(_), content @ Ok(_)) => Err(("expected Data::Object", content)),
+            (_, content @ Err(_)) => Err(("cannot add unsupported data back to a tag", content)),
+        };
+
+        res.map_err(move |(reason, content)| {
+            let data = content.map_or_else(std::convert::identity, convert_id3_to_sauti_data_owned);
+            MetadataError::InvalidDataType {
+                id,
+                reason: Some(reason.to_owned()),
+                recovered_data: Box::new(DataOpt::some(data)),
+            }
+        })
+    }
+
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        fn add_to_previous_string(string: String, tag: &id3::Tag, id: &str) -> String {
+            let prev_text = tag.get(id).and_then(|frame| {
+                let content = frame.content();
+                content.text().or_else(|| content.link())
+            });
+
+            if let Some(prev_text) = prev_text {
+                format!("{prev_text}\0{string}")
+            } else {
+                string
+            }
+        }
+
+        let data = match (convert_sauti_to_id3_id(id.clone()), data) {
+            (Id::Text(ident), Data::Text(text)) => {
+                let text = add_to_previous_string(text, &self.tag, ident);
+                Data::Text(text)
+            }
+            (Id::Text(ident), Data::Link(link)) => {
+                let link = add_to_previous_string(link, &self.tag, ident);
+                Data::Link(link)
+            }
+            (_, other) => other,
+        };
+
+        self.replace(id, data)
+    }
+
+    fn remove(&mut self, id: FrameId) {
+        match convert_sauti_to_id3_id(id) {
+            Id::Text(ident) => {
+                self.tag.remove(ident);
+            }
+            Id::Picture(picture_type) => {
                 self.tag.remove_picture_by_type(picture_type);
             }
-            (Id::InvolvedPeople, Some(Content::InvolvedPeopleList(ipl))) => {
-                self.tag.add_frame(ipl);
-            }
-            (Id::InvolvedPeople, _) => {
+            Id::InvolvedPeople => {
                 let ipl_ids: Vec<_> = self
                     .tag
                     .frames()
@@ -471,22 +598,10 @@ impl super::super::Tag for Tag {
                     self.tag.remove(id);
                 }
             }
-            (Id::CustomText(description), Some(Content::Text(value) | Content::Link(value))) => {
-                self.tag.add_frame(id3::frame::ExtendedText {
-                    description: description.to_string(),
-                    value,
-                });
-            }
-            (Id::CustomText(description), _) => {
+            Id::CustomText(description) => {
                 self.tag.remove_extended_text(Some(&description), None);
             }
-            (Id::CustomLink(description), Some(Content::Text(link) | Content::Link(link))) => {
-                self.tag.add_frame(id3::frame::ExtendedLink {
-                    description: description.to_string(),
-                    link,
-                });
-            }
-            (Id::CustomLink(description), _) => {
+            Id::CustomLink(description) => {
                 // for some reason the id3 crate doesn't have a remove_extended_link method
                 self.tag.frames_vec_mut().retain(|val| {
                     val.content()
@@ -494,18 +609,11 @@ impl super::super::Tag for Tag {
                         .is_none_or(|link| *link.description != *description)
                 });
             }
-            (Id::Object(description), Some(Content::EncapsulatedObject(mut object))) => {
-                object.description = description.to_string();
-                self.tag.add_frame(object);
-            }
-            (Id::Object(description), _) => {
+            Id::Object(description) => {
                 self.tag
                     .remove_encapsulated_object(Some(&description), None, None, None);
             }
-            (Id::Unknown(id), Some(data)) => {
-                self.tag.add_frame(id3::Frame::with_content(id, data));
-            }
-            (Id::Unknown(id), None) => {
+            Id::Unknown(id) => {
                 self.tag.remove(id);
             }
         }

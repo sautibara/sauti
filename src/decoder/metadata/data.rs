@@ -117,6 +117,7 @@ macro_rules! frame_opt {
         #[doc = concat!($docs, " [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).\n")]
         #[doc = "\n"]
         #[doc = concat!("See [`", stringify!($from), "`], [`FrameOptLike`].")]
+        #[derive(Clone, Debug)]
         pub struct $to $($lt)* (pub Option<$from $($lt)*>);
 
         impl $($lt)* FrameOptLike for $to $($lt)* {
@@ -356,6 +357,7 @@ macro_rules! data_opt {
         #[doc = concat!($docs, " piece of metadata associated with a [`Tag`](super::Tag).\n")]
         #[doc = "\n"]
         #[doc = concat!("See [`", stringify!($from), "`], [`DataLike`], and [`DataOptLike`].")]
+        #[derive(Clone, Debug)]
         pub struct $to $($lt)* (pub Option<$from $($lt)*>);
 
         impl $($lt)* DataOptLike for $to $($lt)* {

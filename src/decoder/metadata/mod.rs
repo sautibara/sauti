@@ -9,12 +9,10 @@ use thiserror::Error;
 pub mod prelude {
     pub use super::super::{ExtensionSet, MetadataDecoder};
     pub use super::data::*;
-    pub use super::{MetadataError, MetadataResult};
+    pub use super::{FrameId, MetadataError, MetadataResult};
     pub use crate::data::prelude::*;
 
     pub use super::Decoder as _;
-    pub use super::DynDecoder as _;
-    pub use super::DynTag as _;
     pub use super::Tag as _;
 }
 
@@ -90,7 +88,8 @@ pub trait Decoder: Send + 'static {
 /// A object safe version of [`Decoder`] - a trait that can read the metadata of files.
 ///
 /// This is implemented for all types that have implementations for [`Decoder`] by wrapping their
-/// concrete tag types into [`DynTag`] objects.
+/// concrete tag types into [`DynTag`] objects. Then, [`Decoder`] is implemented for both
+/// `Box<dyn DynDecoder>` and `dyn DynDecoder`, so they can be used natively as decoders.
 pub trait DynDecoder: Send + 'static {
     /// Try to decode and read this file, returning `Ok(None)` if the format isn't supported
     ///
@@ -98,7 +97,7 @@ pub trait DynDecoder: Send + 'static {
     ///
     /// - If there is some error with IO
     /// - If there is a backend-specific error
-    fn read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Box<dyn DynTag>>>;
+    fn dyn_read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Box<dyn DynTag>>>;
 
     /// Try to decode and read this file, returning `Err(UnsupportedFormat)` if the format isn't supported
     ///
@@ -107,28 +106,62 @@ pub trait DynDecoder: Send + 'static {
     /// - If the format isn't supported
     /// - If there is an error with IO
     /// - If there is a backend-specific error
-    fn read(&self, source: &MediaSource) -> MetadataResult<Box<dyn DynTag>>;
+    fn dyn_read(&self, source: &MediaSource) -> MetadataResult<Box<dyn DynTag>>;
 
     /// Get a [set](ExtensionSet) of all file extensions that this decoder can possibly decode.
     ///
     /// This does not mean that the decoder must be able to decode every file with this extension -
     /// only that it may be able to.
-    fn supported_extensions(&self) -> ExtensionSet;
+    fn dyn_supported_extensions(&self) -> ExtensionSet;
 }
 
-/// A result of an operation on a [`Decoder`]
 impl<D: Decoder> DynDecoder for D {
-    fn read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Box<dyn DynTag>>> {
+    fn dyn_read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Box<dyn DynTag>>> {
         <Self as Decoder>::read_fallible(self, source)
             .map(|opt| opt.map(|tag| Box::new(tag) as Box<dyn DynTag>))
     }
 
-    fn read(&self, source: &MediaSource) -> MetadataResult<Box<dyn DynTag>> {
+    fn dyn_read(&self, source: &MediaSource) -> MetadataResult<Box<dyn DynTag>> {
         <Self as Decoder>::read(self, source).map(|tag| Box::new(tag) as Box<dyn DynTag>)
     }
 
-    fn supported_extensions(&self) -> ExtensionSet {
+    fn dyn_supported_extensions(&self) -> ExtensionSet {
         <Self as Decoder>::supported_extensions(self)
+    }
+}
+
+impl Decoder for dyn DynDecoder {
+    type Tag = Box<dyn DynTag>;
+
+    fn read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Self::Tag>> {
+        self.dyn_read_fallible(source)
+    }
+
+    fn read(&self, source: &MediaSource) -> MetadataResult<Self::Tag> {
+        self.dyn_read(source)
+    }
+
+    fn supported_extensions(&self) -> ExtensionSet {
+        self.dyn_supported_extensions()
+    }
+}
+
+// the compiler would use the `impl DynDecoder for D: Decoder` implementation instead,
+// leading to a stack overflow
+#[allow(clippy::needless_borrow)]
+impl Decoder for Box<dyn DynDecoder> {
+    type Tag = Box<dyn DynTag>;
+
+    fn read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Self::Tag>> {
+        (&**self).dyn_read_fallible(source)
+    }
+
+    fn read(&self, source: &MediaSource) -> MetadataResult<Self::Tag> {
+        (&**self).dyn_read(source)
+    }
+
+    fn supported_extensions(&self) -> ExtensionSet {
+        (&**self).dyn_supported_extensions()
     }
 }
 
@@ -153,11 +186,28 @@ pub trait Tag {
     /// Returns a iterator over the [`Data`] of all frames with a specific [`FrameId`].
     fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow>;
 
+    /// Replaces the [`Data`] for `id` with `data`. This removes any old data and adds `data` in
+    /// its place.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        self.remove(id.clone());
+        self.add(id, data)
+    }
+
     /// Sets the [`Data`] for a specific [`FrameId`]. If the underlying metadata allows multiple
     /// frames with this id, this will add a frame without removing the rest. If it doesn't allow
-    /// multiple frames, this will overwrite the previous frame. Lastly, if `data` is
-    /// [`DataOpt::none`] or otherwise not valid for `id`, all frames with this id will be removed.
-    fn set(&mut self, id: FrameId, data: DataOpt);
+    /// multiple frames, this will overwrite the previous frame.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()>;
+
+    /// Removes all [`Data`] for a specific [`FrameId`].
+    fn remove(&mut self, id: FrameId);
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
     fn frames(&self) -> impl Iterator<Item = FrameCow>;
@@ -173,51 +223,156 @@ pub trait Tag {
 /// A object safe version of [`Tag`] - a trait that represents the read metadata of a file.
 ///
 /// This is implemented for all types that have implementations for [`Tag`] by wrapping their
-/// iterators into objects.
+/// iterators into objects. Then, [`Tag`] is implemented for both `Box<dyn DynTag>` and
+/// `dyn DynTag`, so they can be used natively as tags.
 pub trait DynTag {
     /// Returns `true` if this tag contains corresponding [`Data`] for a specific [`FrameId`].
-    fn has(&self, id: FrameId) -> bool;
+    fn dyn_has(&self, id: FrameId) -> bool;
 
     /// Returns the [`Data`] of the first frame with a specific [`FrameId`].
     ///
     /// This can be either a reference to the inner metadata (as a [`DataCow::Ref`]) or an owned
     /// object created from the inner metadata (as a [`DataCow::Owned`]).
-    fn get(&self, id: FrameId) -> DataOptCow<'_>;
+    fn dyn_get(&self, id: FrameId) -> DataOptCow<'_>;
 
     /// Returns an iterator over the [`Data`] of all frames with a specific [`FrameId`].
-    fn get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_>;
+    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_>;
+
+    /// Replaces the [`Data`] for `id` with `data`. This removes any old data and adds `data` in
+    /// its place.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
+    fn dyn_replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()>;
 
     /// Sets the [`Data`] for a specific [`FrameId`]. If the underlying metadata allows multiple
     /// frames with this id, this will add a frame without removing the rest. If it doesn't allow
-    /// multiple frames, this will overwrite the previous frame. Lastly, if `data` is
-    /// [`DataOpt::none`] or otherwise not valid for `id`, all frames with this id will be removed.
-    fn set(&mut self, id: FrameId, data: DataOpt);
+    /// multiple frames, this may overwrite the previous frame.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
+    fn dyn_add(&mut self, id: FrameId, data: Data) -> MetadataResult<()>;
+
+    /// Removes all [`Data`] for a specific [`FrameId`].
+    fn dyn_remove(&mut self, id: FrameId);
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
-    fn frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_>;
+    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_>;
+
+    /// Saves this tag to the file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// - Any backend-specific errors.
+    fn dyn_save(&self, path: &Path) -> MetadataResult<()>;
 }
 
 impl<T: Tag> DynTag for T {
-    fn has(&self, id: FrameId) -> bool {
+    fn dyn_has(&self, id: FrameId) -> bool {
         <Self as Tag>::has(self, id)
     }
 
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn dyn_get(&self, id: FrameId) -> DataOptCow<'_> {
         <Self as Tag>::get(self, id)
     }
 
-    fn get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_> {
+    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_> {
         let iter = <Self as Tag>::get_all(self, id);
         Box::new(iter)
     }
 
-    fn set(&mut self, id: FrameId, data: DataOpt) {
-        <Self as Tag>::set(self, id, data);
+    fn dyn_replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        <Self as Tag>::replace(self, id, data)
     }
 
-    fn frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_> {
+    fn dyn_add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        <Self as Tag>::add(self, id, data)
+    }
+
+    fn dyn_remove(&mut self, id: FrameId) {
+        <Self as Tag>::remove(self, id);
+    }
+
+    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_> {
         let iter = <Self as Tag>::frames(self);
         Box::new(iter)
+    }
+
+    fn dyn_save(&self, path: &Path) -> MetadataResult<()> {
+        <Self as Tag>::save(self, path)
+    }
+}
+
+impl Tag for dyn DynTag {
+    fn has(&self, id: FrameId) -> bool {
+        self.dyn_has(id)
+    }
+
+    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+        self.dyn_get(id)
+    }
+
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+        self.dyn_get_all(id)
+    }
+
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        self.dyn_replace(id, data)
+    }
+
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        self.dyn_add(id, data)
+    }
+
+    fn remove(&mut self, id: FrameId) {
+        self.dyn_remove(id);
+    }
+
+    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+        self.dyn_frames()
+    }
+
+    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
+        self.dyn_save(path.as_ref())
+    }
+}
+
+// the compiler would use the `impl DynTag for T: Tag` implementation instead,
+// leading to a stack overflow
+#[allow(clippy::needless_borrow)]
+impl Tag for Box<dyn DynTag> {
+    fn has(&self, id: FrameId) -> bool {
+        (&**self).dyn_has(id)
+    }
+
+    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+        (&**self).dyn_get(id)
+    }
+
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+        (&**self).dyn_get_all(id)
+    }
+
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        (&mut **self).dyn_replace(id, data)
+    }
+
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        (&mut **self).dyn_add(id, data)
+    }
+
+    fn remove(&mut self, id: FrameId) {
+        (&mut **self).dyn_remove(id);
+    }
+
+    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+        (&**self).dyn_frames()
+    }
+
+    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
+        (&**self).dyn_save(path.as_ref())
     }
 }
 
@@ -237,6 +392,22 @@ pub enum MetadataError {
     UnsupportedFormat {
         source: SourceName,
         reason: Option<String>,
+    },
+    #[error(
+        "frame {id:?} given invalid data{}{}",
+        reason.as_ref().map_or(
+            String::new(),
+            |reason| format!(": {reason}")
+        ),
+        recovered_data.as_option().map_or(
+            String::new(),
+            |recovered_data| format!(" (recovered: {recovered_data:?})")
+        ),
+    )]
+    InvalidDataType {
+        id: FrameId,
+        reason: Option<String>,
+        recovered_data: Box<DataOpt>,
     },
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),

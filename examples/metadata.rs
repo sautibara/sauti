@@ -1,7 +1,7 @@
 use std::{error::Error, path::PathBuf};
 
 use sauti::decoder::metadata::prelude::*;
-use sauti::decoder::metadata::{DynDecoder, FrameId};
+use sauti::decoder::metadata::DynDecoder;
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
@@ -15,10 +15,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let decoder = sauti::decoder::metadata::default();
-    let dyn_decoder = Box::new(decoder) as Box<dyn DynDecoder>;
+    // Dynamic dispatch can be used if needed, and the api doesn't change at all.
+    // If the line below is removed, the file will still compile and work the same.
+    let decoder = Box::new(decoder) as Box<dyn DynDecoder>;
 
-    let source = sauti::data::MediaSource::Path(PathBuf::from(path));
-    let metadata = dyn_decoder.read(&source)?;
+    let source = sauti::data::MediaSource::Path(PathBuf::from(&path));
+    let metadata = decoder.read(&source)?;
 
     let title = metadata.get(FrameId::Title);
     let title = title.as_string().unwrap_or("<unknown>");
