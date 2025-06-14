@@ -837,6 +837,18 @@ impl Debug for PictureRef<'_> {
     }
 }
 
+impl<'a> From<PictureRef<'a>> for Picture {
+    fn from(value: PictureRef<'a>) -> Self {
+        value.to_owned()
+    }
+}
+
+impl<'a> From<&'a Picture> for PictureRef<'a> {
+    fn from(value: &'a Picture) -> Self {
+        value.to_ref()
+    }
+}
+
 /// The type of a picture within an audio file.
 ///
 /// This is taken from [id3 specification](https://hexdocs.pm/id3/ID3.Picture.html), since both `id3`

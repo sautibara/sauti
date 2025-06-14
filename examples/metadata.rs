@@ -1,7 +1,8 @@
 use std::{error::Error, path::PathBuf};
 
+use gat_lending_iterator::LendingIterator;
 use sauti::decoder::metadata::prelude::*;
-use sauti::decoder::metadata::DynDecoder;
+use sauti::decoder::metadata::{DynDecoder, FrameId};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
@@ -24,16 +25,36 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let title = metadata.get(FrameId::Title);
     let title = title.as_string().unwrap_or("<unknown>");
-    let artist = metadata.get(FrameId::Artist);
-    let artist = artist.as_string().unwrap_or("<unknown>");
     let album = metadata.get(FrameId::Album);
     let album = album.as_string().unwrap_or("<unknown>");
 
-    println!("{title} by {artist} in {album}");
+    let iter = metadata.get_all(FrameId::Artist);
+    let artists = separate_strings(iter, " & ");
+
+    println!("Track: '{title}' by '{artists}' in '{album}'");
+
+    println!();
 
     for frame in metadata.frames() {
         println!("{frame:?}");
     }
 
     Ok(())
+}
+
+/// Combines the strings in `iter` with commas in between.
+fn separate_strings<'a>(iter: impl Iterator<Item = DataCow<'a>>, separator: &str) -> String {
+    let mut iter = iter.strings();
+    let mut output: Option<String> = None;
+    // due to an issue with the language, `iter.strings()` cannot use iterator combinators, so we
+    // have to do a imperative loop here (instead of [`LendingIterator::fold`], for example).
+    while let Some(next) = iter.next() {
+        if let Some(artists) = output.as_mut() {
+            artists.push_str(separator);
+            artists.push_str(next);
+        } else {
+            output = Some(next.to_owned());
+        }
+    }
+    output.unwrap_or_else(|| "<unknown>".to_owned())
 }

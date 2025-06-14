@@ -14,6 +14,9 @@ pub mod prelude {
 
     pub use super::Decoder as _;
     pub use super::Tag as _;
+
+    pub use super::data_iter::DataIterExt as _;
+    pub use gat_lending_iterator::LendingIterator as _;
 }
 
 pub mod implementations {
@@ -22,6 +25,9 @@ pub mod implementations {
 
 pub mod data;
 pub use data::{Data, DataCow, DataRef, Frame, FrameCow, FrameId, FrameRef};
+
+pub mod data_iter;
+pub mod frame_iter;
 
 /// The output type of [`default`]
 pub type Default = implementations::id3::Decoder;
