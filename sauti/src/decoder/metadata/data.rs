@@ -2,6 +2,8 @@
 
 use std::{fmt::Debug, sync::Arc};
 
+use gat_borrow::{IntoOwnedImpl, Reborrow, ToRef};
+
 /// Any possible key for a [`Frame`] of metadata in a [`Tag`](super::Tag).
 ///
 /// This type can be expected to be cheaply cloneable ("claimable"), using reference counting if
@@ -73,7 +75,7 @@ pub trait FrameOptLike: Sized + From<Option<Self::Some>> + Into<Option<Self::Som
     /// Returns a [`FrameRef`] pointing to this frame.
     #[must_use]
     fn to_ref(&self) -> FrameOptRef {
-        self.as_option().map(FrameLike::to_ref).into()
+        self.as_option().map(ToRef::to_ref).into()
     }
 
     /// Creates an owned [`Frame`] struct by allocating this frame if necessary.
@@ -96,10 +98,10 @@ pub trait FrameOptLike: Sized + From<Option<Self::Some>> + Into<Option<Self::Som
 /// A [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Frame`], [`FrameRef`], and [`FrameCow`].
-pub trait FrameLike {
-    /// Returns a [`FrameRef`] pointing to this frame.
-    #[must_use]
-    fn to_ref(&self) -> FrameRef;
+pub trait FrameLike: for<'a> ToRef<'a, FrameRef<'a>> {
+    ///// Returns a [`FrameRef`] pointing to this frame.
+    //#[must_use]
+    //fn to_ref(&self) -> FrameRef;
 
     /// Creates an owned [`Frame`] struct by allocating this frame if necessary.
     #[must_use]
@@ -163,14 +165,16 @@ pub struct Frame {
     pub data: Data,
 }
 
-impl FrameLike for Frame {
-    fn to_ref(&self) -> FrameRef {
+impl<'a> ToRef<'a, FrameRef<'a>> for Frame {
+    fn to_ref(&'a self) -> FrameRef<'a> {
         FrameRef {
             id: self.id.clone(),
             data: self.data.to_ref(),
         }
     }
+}
 
+impl FrameLike for Frame {
     fn into_owned(self) -> Frame {
         self
     }
@@ -196,11 +200,13 @@ pub struct FrameRef<'a> {
     pub data: DataRef<'a>,
 }
 
-impl FrameLike for FrameRef<'_> {
+impl<'a> ToRef<'a, FrameRef<'a>> for FrameRef<'_> {
     fn to_ref(&self) -> FrameRef {
         self.clone()
     }
+}
 
+impl FrameLike for FrameRef<'_> {
     fn into_owned(self) -> Frame {
         Frame {
             id: self.id,
@@ -226,7 +232,7 @@ pub struct FrameCow<'a> {
     pub data: DataCow<'a>,
 }
 
-impl FrameLike for FrameCow<'_> {
+impl<'a> ToRef<'a, FrameRef<'a>> for FrameCow<'_> {
     /// Unwraps a [`FrameRef`] if the underlying data is a [`Ref`], or takes a reference if it is an
     /// [`Owned`].
     ///
@@ -238,7 +244,9 @@ impl FrameLike for FrameCow<'_> {
             data: self.data.to_ref(),
         }
     }
+}
 
+impl FrameLike for FrameCow<'_> {
     /// Unwraps [`Frame`] if the underlying data is an [`Owned`], or creates owned data by
     /// allocating if it is a [`Ref`].
     ///
@@ -300,7 +308,7 @@ pub trait DataOptLike: DataLike + From<Option<Self::Some>> + Into<Option<Self::S
     /// Returns a [`DataOptRef`] pointing to this frame.
     #[must_use]
     fn to_ref(&self) -> DataOptRef {
-        self.as_option().map(DataSomeLike::to_ref).into()
+        self.as_option().map(ToRef::to_ref).into()
     }
 
     /// Creates an owned [`DataOpt`] struct by allocating this frame if necessary.
@@ -313,11 +321,7 @@ pub trait DataOptLike: DataLike + From<Option<Self::Some>> + Into<Option<Self::S
 /// A piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Data`], [`DataRef`], and [`DataCow`].
-pub trait DataSomeLike: DataLike {
-    /// Returns a [`DataRef`] pointing to this data.
-    #[must_use]
-    fn to_ref(&self) -> DataRef<'_>;
-
+pub trait DataSomeLike: DataLike + for<'a> ToRef<'a, DataRef<'a>> {
     /// Creates an owned [`Data`] struct by allocating this data if necessary.
     #[must_use]
     fn into_owned(self) -> Data;
@@ -458,7 +462,7 @@ impl From<String> for Data {
     }
 }
 
-impl DataSomeLike for Data {
+impl<'a> ToRef<'a, DataRef<'a>> for Data {
     fn to_ref(&self) -> DataRef<'_> {
         match self {
             Self::Unsupported { reason } => DataRef::Unsupported {
@@ -471,7 +475,9 @@ impl DataSomeLike for Data {
             Self::Object(object) => DataRef::Object(object.to_ref()),
         }
     }
+}
 
+impl DataSomeLike for Data {
     fn into_owned(self) -> Data {
         self
     }
@@ -601,7 +607,7 @@ impl Data {
 /// necessary.
 ///
 /// See [`DataOptRef`], [`DataLike`], and [`DataSomeLike`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Reborrow)]
 #[non_exhaustive]
 pub enum DataRef<'a> {
     Unsupported { reason: Option<&'a str> },
@@ -610,6 +616,21 @@ pub enum DataRef<'a> {
     Picture(PictureRef<'a>),
     InvolvedPeople(InvolvedPeopleRef<'a>),
     Object(ObjectRef<'a>),
+}
+
+impl DataRef<'_> {
+    pub fn into_owned(self) -> Data {
+        match self {
+            Self::Unsupported { reason } => Data::Unsupported {
+                reason: reason.map(str::to_owned),
+            },
+            Self::Text(string) => Data::Text((*string).to_owned()),
+            Self::Link(string) => Data::Link((*string).to_owned()),
+            Self::Picture(reference) => Data::Picture(reference.into_owned()),
+            Self::InvolvedPeople(people) => Data::InvolvedPeople(people.into_owned()),
+            Self::Object(object) => Data::Object(object.into_owned()),
+        }
+    }
 }
 
 impl<'a> From<ObjectRef<'a>> for DataRef<'a> {
@@ -636,22 +657,23 @@ impl<'a> From<&'a str> for DataRef<'a> {
     }
 }
 
-impl DataSomeLike for DataRef<'_> {
+impl<'a> ToRef<'a, DataRef<'a>> for DataRef<'_> {
     fn to_ref(&self) -> DataRef<'_> {
         self.clone()
     }
+}
 
+impl<'a> IntoOwnedImpl<'a> for DataRef<'a> {
+    type Owned = Data;
+
+    fn into_owned(self) -> Self::Owned {
+        self.into_owned()
+    }
+}
+
+impl DataSomeLike for DataRef<'_> {
     fn into_owned(self) -> Data {
-        match self {
-            Self::Unsupported { reason } => Data::Unsupported {
-                reason: reason.map(str::to_owned),
-            },
-            Self::Text(string) => Data::Text((*string).to_owned()),
-            Self::Link(string) => Data::Link((*string).to_owned()),
-            Self::Picture(reference) => Data::Picture(reference.to_owned()),
-            Self::InvolvedPeople(people) => Data::InvolvedPeople(people.to_owned()),
-            Self::Object(object) => Data::Object(object.to_owned()),
-        }
+        self.into_owned()
     }
 }
 
@@ -735,14 +757,16 @@ macro_rules! child_call {
     };
 }
 
-impl DataSomeLike for DataCow<'_> {
+impl<'a> ToRef<'a, DataRef<'a>> for DataCow<'_> {
     fn to_ref(&self) -> DataRef<'_> {
         match self {
             Self::Owned(owned) => owned.to_ref(),
             Self::Ref(reference) => reference.clone(),
         }
     }
+}
 
+impl DataSomeLike for DataCow<'_> {
     fn into_owned(self) -> Data {
         match self {
             Self::Owned(owned) => owned,
@@ -785,10 +809,9 @@ pub struct Picture {
     pub data: Vec<u8>,
 }
 
-impl Picture {
+impl<'a> ToRef<'a, PictureRef<'a>> for Picture {
     /// Returns a [`PictureRef`] pointing to this.
-    #[must_use]
-    pub fn to_ref(&self) -> PictureRef<'_> {
+    fn to_ref(&self) -> PictureRef<'_> {
         PictureRef {
             mime_type: &self.mime_type,
             description: &self.description,
@@ -808,17 +831,18 @@ impl Debug for Picture {
 }
 
 /// A reference to a picture that could be associated with an audio file.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Reborrow)]
 pub struct PictureRef<'a> {
     pub mime_type: &'a str,
     pub description: &'a str,
     pub data: &'a [u8],
 }
 
-impl PictureRef<'_> {
+impl<'a> IntoOwnedImpl<'a> for PictureRef<'a> {
+    type Owned = Picture;
+
     /// Creates an owned [`Picture`] struct by allocating this if necessary.
-    #[must_use]
-    pub fn to_owned(&self) -> Picture {
+    fn into_owned(self) -> Self::Owned {
         Picture {
             mime_type: self.mime_type.to_owned(),
             description: self.description.to_owned(),
@@ -839,7 +863,7 @@ impl Debug for PictureRef<'_> {
 
 impl<'a> From<PictureRef<'a>> for Picture {
     fn from(value: PictureRef<'a>) -> Self {
-        value.to_owned()
+        value.into_owned()
     }
 }
 
@@ -886,10 +910,10 @@ pub struct InvolvedPerson {
     pub involvement: String,
 }
 
-impl InvolvedPerson {
+impl<'a> ToRef<'a, InvolvedPersonRef<'a>> for InvolvedPerson {
     /// Returns a [`InvolvedPersonRef`] pointing to this.
     #[must_use]
-    pub fn to_ref(&self) -> InvolvedPersonRef<'_> {
+    fn to_ref(&'a self) -> InvolvedPersonRef<'a> {
         InvolvedPersonRef {
             name: &self.name,
             involvement: &self.involvement,
@@ -898,16 +922,17 @@ impl InvolvedPerson {
 }
 
 /// A reference to a person that was involved in the creation of an audio file - see [`InvolvedPeople`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Reborrow)]
 pub struct InvolvedPersonRef<'a> {
     pub name: &'a str,
     pub involvement: &'a str,
 }
 
-impl InvolvedPersonRef<'_> {
+impl<'a> IntoOwnedImpl<'a> for InvolvedPersonRef<'a> {
+    type Owned = InvolvedPerson;
+
     /// Creates an owned [`InvolvedPerson`] struct by allocating this if necessary.
-    #[must_use]
-    pub fn to_owned(&self) -> InvolvedPerson {
+    fn into_owned(self) -> Self::Owned {
         InvolvedPerson {
             name: self.name.to_owned(),
             involvement: self.involvement.to_owned(),
@@ -919,6 +944,14 @@ impl InvolvedPersonRef<'_> {
 #[derive(Clone, Debug)]
 pub struct InvolvedPeople(pub Box<[InvolvedPerson]>);
 
+impl<'a> ToRef<'a, InvolvedPeopleRef<'a>> for InvolvedPeople {
+    /// Returns a [`InvolvedPeopleRef`] pointing to this.
+    #[must_use]
+    fn to_ref(&'a self) -> InvolvedPeopleRef<'a> {
+        InvolvedPeopleRef::Slice(self)
+    }
+}
+
 impl std::ops::Deref for InvolvedPeople {
     type Target = [InvolvedPerson];
 
@@ -928,12 +961,6 @@ impl std::ops::Deref for InvolvedPeople {
 }
 
 impl InvolvedPeople {
-    /// Returns a [`InvolvedPeopleRef`] pointing to this.
-    #[must_use]
-    pub fn to_ref(&self) -> InvolvedPeopleRef<'_> {
-        InvolvedPeopleRef::Slice(self)
-    }
-
     /// Returns an iterator over the [`InvolvedPersonRef`]s in this list.
     #[must_use]
     pub fn iter(&self) -> InvolvedPeopleRefIter<'_> {
@@ -950,24 +977,31 @@ impl<'a> IntoIterator for &'a InvolvedPeople {
 }
 
 /// A reference to a list of people involved in the creation of an audio file and their involvement.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Reborrow)]
 pub enum InvolvedPeopleRef<'a> {
     Slice(&'a [InvolvedPerson]),
     References(Arc<[InvolvedPersonRef<'a>]>),
 }
 
-impl InvolvedPeopleRef<'_> {
+impl<'a> IntoOwnedImpl<'a> for InvolvedPeopleRef<'a> {
+    type Owned = InvolvedPeople;
+
     /// Creates an owned [`InvolvedPeople`] struct by allocating this if necessary.
-    #[must_use]
-    pub fn to_owned(&self) -> InvolvedPeople {
+    fn into_owned(self) -> Self::Owned {
         match self {
             Self::Slice(slice) => InvolvedPeople((*slice).into()),
-            Self::References(references) => {
-                InvolvedPeople(references.iter().map(InvolvedPersonRef::to_owned).collect())
-            }
+            Self::References(references) => InvolvedPeople(
+                references
+                    .iter()
+                    .copied()
+                    .map(InvolvedPersonRef::into_owned)
+                    .collect(),
+            ),
         }
     }
+}
 
+impl InvolvedPeopleRef<'_> {
     /// Returns an iterator over the [`InvolvedPersonRef`]s in this list.
     #[must_use]
     pub fn iter(&self) -> InvolvedPeopleRefIter<'_> {
@@ -1018,10 +1052,9 @@ pub struct Object {
     pub data: Vec<u8>,
 }
 
-impl Object {
+impl<'a> ToRef<'a, ObjectRef<'a>> for Object {
     /// Returns a [`ObjectRef`] pointing to this.
-    #[must_use]
-    pub fn to_ref(&self) -> ObjectRef<'_> {
+    fn to_ref(&'a self) -> ObjectRef<'a> {
         ObjectRef {
             mime_type: self.mime_type.as_deref(),
             filename: self.filename.as_deref(),
@@ -1031,17 +1064,18 @@ impl Object {
 }
 
 /// A reference to an application-specific binary object.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Reborrow)]
 pub struct ObjectRef<'a> {
     pub mime_type: Option<&'a str>,
     pub filename: Option<&'a str>,
     pub data: &'a [u8],
 }
 
-impl ObjectRef<'_> {
+impl<'a> IntoOwnedImpl<'a> for ObjectRef<'a> {
+    type Owned = Object;
+
     /// Creates an owned [`Object`] struct by allocating this if necessary.
-    #[must_use]
-    pub fn to_owned(&self) -> Object {
+    fn into_owned(self) -> Self::Owned {
         Object {
             mime_type: self.mime_type.map(ToOwned::to_owned),
             filename: self.filename.map(ToOwned::to_owned),

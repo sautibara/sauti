@@ -17,6 +17,9 @@ pub mod prelude {
 
     pub use super::data_iter::DataIterExt as _;
     pub use gat_lending_iterator::LendingIterator as _;
+
+    pub use gat_borrow::IntoOwnedImpl as _;
+    pub use gat_borrow::ToRef as _;
 }
 
 pub mod implementations {

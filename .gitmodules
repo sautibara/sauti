@@ -1,0 +1,3 @@
+[submodule "gat-borrow"]
+	path = gat-borrow
+	url = git@github.com:sautibara/gat-borrow.git
