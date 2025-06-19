@@ -174,6 +174,27 @@ impl Decoder for Box<dyn DynDecoder> {
     }
 }
 
+/// Represents an operation that can be performed on a [`Tag`] to determine if it supports it or not.
+pub enum Supports {
+    Get(FrameId),
+    GetAll(FrameId),
+    Add(FrameId),
+    Remove(FrameId),
+    Data(DataType),
+    Frames,
+    Save,
+}
+
+impl Supports {
+    #[must_use]
+    pub const fn frame_id(&self) -> Option<&FrameId> {
+        match self {
+            Self::Get(id) | Self::GetAll(id) | Self::Add(id) | Self::Remove(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
 /// A type that represents the metadata of a file, allowing for both reading and writing.
 ///
 /// For an object-safe version of this trait, see [`DynTag`], which is implemented for all types
@@ -227,6 +248,12 @@ pub trait Tag {
     ///
     /// - Any backend-specific errors.
     fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()>;
+
+    /// Returns `true` if this [`Tag`] may support the operation of `query`.
+    ///
+    /// This should not actually perform the query itself, it should only return `false` if there
+    /// is no chance of the tag supporting the query.
+    fn supports(&self, query: Supports) -> bool;
 }
 
 /// A object safe version of [`Tag`] - a trait that represents the read metadata of a file.
@@ -276,6 +303,12 @@ pub trait DynTag {
     ///
     /// - Any backend-specific errors.
     fn dyn_save(&self, path: &Path) -> MetadataResult<()>;
+
+    /// Returns `true` if this [`Tag`] may support the operation of `query`.
+    ///
+    /// This should not actually perform the query itself, it should only return `false` if there
+    /// is no chance of the tag supporting the query.
+    fn dyn_supports(&self, query: Supports) -> bool;
 }
 
 impl<T: Tag> DynTag for T {
@@ -312,6 +345,10 @@ impl<T: Tag> DynTag for T {
     fn dyn_save(&self, path: &Path) -> MetadataResult<()> {
         <Self as Tag>::save(self, path)
     }
+
+    fn dyn_supports(&self, query: Supports) -> bool {
+        <Self as Tag>::supports(self, query)
+    }
 }
 
 impl Tag for dyn DynTag {
@@ -345,6 +382,10 @@ impl Tag for dyn DynTag {
 
     fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
         self.dyn_save(path.as_ref())
+    }
+
+    fn supports(&self, query: Supports) -> bool {
+        self.dyn_supports(query)
     }
 }
 
@@ -382,6 +423,10 @@ impl Tag for Box<dyn DynTag> {
 
     fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
         (&**self).dyn_save(path.as_ref())
+    }
+
+    fn supports(&self, query: Supports) -> bool {
+        (&**self).dyn_supports(query)
     }
 }
 

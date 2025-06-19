@@ -325,6 +325,10 @@ pub trait DataSomeLike: DataLike + for<'a> ToRef<'a, DataRef<'a>> {
     /// Creates an owned [`Data`] struct by allocating this data if necessary.
     #[must_use]
     fn into_owned(self) -> Data;
+
+    /// Gets the [`DataType`] of this data, or [`None`] if the data is
+    /// [`Unsupported`](Data::Unsupported).
+    fn data_type(&self) -> Option<DataType>;
 }
 
 /// A potentially optional piece of metadata associated with a [`Tag`](super::Tag).
@@ -424,6 +428,17 @@ data_opt!(from: Data, to: DataOpt, docs: "An optional, owned", lt: <>);
 data_opt!(from: DataRef, to: DataOptRef, docs: "An optional reference to", lt: <'a>);
 data_opt!(from: DataCow, to: DataOptCow, docs: "An optional, owned or referenced", lt: <'a>);
 
+/// Represents the different variants that [`Data`] can be, without concrete values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DataType {
+    Text,
+    Link,
+    Picture,
+    InvolvedPeople,
+    Object,
+}
+
 /// An owned piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`DataOpt`], [`DataLike`] and [`DataSomeLike`].
@@ -480,6 +495,17 @@ impl<'a> ToRef<'a, DataRef<'a>> for Data {
 impl DataSomeLike for Data {
     fn into_owned(self) -> Data {
         self
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        match self {
+            Self::Unsupported { .. } => None,
+            Self::Text(_) => Some(DataType::Text),
+            Self::Link(_) => Some(DataType::Link),
+            Self::Picture(_) => Some(DataType::Picture),
+            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
+            Self::Object(_) => Some(DataType::Object),
+        }
     }
 }
 
@@ -675,6 +701,17 @@ impl DataSomeLike for DataRef<'_> {
     fn into_owned(self) -> Data {
         self.into_owned()
     }
+
+    fn data_type(&self) -> Option<DataType> {
+        match self {
+            Self::Unsupported { .. } => None,
+            Self::Text(_) => Some(DataType::Text),
+            Self::Link(_) => Some(DataType::Link),
+            Self::Picture(_) => Some(DataType::Picture),
+            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
+            Self::Object(_) => Some(DataType::Object),
+        }
+    }
 }
 
 impl DataLike for DataRef<'_> {
@@ -772,6 +809,10 @@ impl DataSomeLike for DataCow<'_> {
             Self::Owned(owned) => owned,
             Self::Ref(reference) => reference.into_owned(),
         }
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        child_call!(self.child.data_type())
     }
 }
 
@@ -912,7 +953,6 @@ pub struct InvolvedPerson {
 
 impl<'a> ToRef<'a, InvolvedPersonRef<'a>> for InvolvedPerson {
     /// Returns a [`InvolvedPersonRef`] pointing to this.
-    #[must_use]
     fn to_ref(&'a self) -> InvolvedPersonRef<'a> {
         InvolvedPersonRef {
             name: &self.name,
@@ -946,7 +986,6 @@ pub struct InvolvedPeople(pub Box<[InvolvedPerson]>);
 
 impl<'a> ToRef<'a, InvolvedPeopleRef<'a>> for InvolvedPeople {
     /// Returns a [`InvolvedPeopleRef`] pointing to this.
-    #[must_use]
     fn to_ref(&'a self) -> InvolvedPeopleRef<'a> {
         InvolvedPeopleRef::Slice(self)
     }
@@ -987,7 +1026,7 @@ impl<'a> IntoOwnedImpl<'a> for InvolvedPeopleRef<'a> {
     type Owned = InvolvedPeople;
 
     /// Creates an owned [`InvolvedPeople`] struct by allocating this if necessary.
-    fn into_owned(self) -> Self::Owned {
+    fn to_own(&self) -> Self::Owned {
         match self {
             Self::Slice(slice) => InvolvedPeople((*slice).into()),
             Self::References(references) => InvolvedPeople(

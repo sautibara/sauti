@@ -628,4 +628,8 @@ impl super::super::Tag for Tag {
             .write_to_path(path, self.tag.version())
             .map_err(|err| MetadataError::Other(Some(err.description)))
     }
+
+    fn supports(&self, _: crate::decoder::metadata::Supports) -> bool {
+        true
+    }
 }
