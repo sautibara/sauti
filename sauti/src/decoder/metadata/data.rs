@@ -4,6 +4,11 @@ use std::{fmt::Debug, sync::Arc};
 
 use gat_borrow::{IntoOwnedImpl, Reborrow, ToRef};
 
+use sealed::Sealed;
+mod sealed {
+    pub trait Sealed {}
+}
+
 /// Any possible key for a [`Frame`] of metadata in a [`Tag`](super::Tag).
 ///
 /// This type can be expected to be cheaply cloneable ("claimable"), using reference counting if
@@ -38,7 +43,9 @@ pub enum FrameId {
 /// An optional [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`].
-pub trait FrameOptLike: Sized + From<Option<Self::Some>> + Into<Option<Self::Some>> {
+pub trait FrameOptLike:
+    Sealed + Sized + From<Option<Self::Some>> + Into<Option<Self::Some>>
+{
     type Some: FrameLike;
 
     /// Returns a new, empty frame.
@@ -98,7 +105,7 @@ pub trait FrameOptLike: Sized + From<Option<Self::Some>> + Into<Option<Self::Som
 /// A [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Frame`], [`FrameRef`], and [`FrameCow`].
-pub trait FrameLike: for<'a> ToRef<'a, FrameRef<'a>> {
+pub trait FrameLike: Sealed + for<'a> ToRef<'a, FrameRef<'a>> {
     ///// Returns a [`FrameRef`] pointing to this frame.
     //#[must_use]
     //fn to_ref(&self) -> FrameRef;
@@ -121,6 +128,8 @@ macro_rules! frame_opt {
         #[doc = concat!("See [`", stringify!($from), "`], [`FrameOptLike`].")]
         #[derive(Clone, Debug)]
         pub struct $to $($lt)* (pub Option<$from $($lt)*>);
+
+        impl $($lt)* Sealed for $to $($lt)* {}
 
         impl $($lt)* FrameOptLike for $to $($lt)* {
             type Some = $from $($lt)*;
@@ -165,6 +174,8 @@ pub struct Frame {
     pub data: Data,
 }
 
+impl Sealed for Frame {}
+
 impl<'a> ToRef<'a, FrameRef<'a>> for Frame {
     fn to_ref(&'a self) -> FrameRef<'a> {
         FrameRef {
@@ -200,6 +211,8 @@ pub struct FrameRef<'a> {
     pub data: DataRef<'a>,
 }
 
+impl Sealed for FrameRef<'_> {}
+
 impl<'a> ToRef<'a, FrameRef<'a>> for FrameRef<'_> {
     fn to_ref(&self) -> FrameRef {
         self.clone()
@@ -231,6 +244,8 @@ pub struct FrameCow<'a> {
     pub id: FrameId,
     pub data: DataCow<'a>,
 }
+
+impl Sealed for FrameCow<'_> {}
 
 impl<'a> ToRef<'a, FrameRef<'a>> for FrameCow<'_> {
     /// Unwraps a [`FrameRef`] if the underlying data is a [`Ref`], or takes a reference if it is an
@@ -271,7 +286,9 @@ impl FrameLike for FrameCow<'_> {
 /// An optional piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`DataOpt`], [`DataOptRef`], and [`DataOptCow`].
-pub trait DataOptLike: DataLike + From<Option<Self::Some>> + Into<Option<Self::Some>> {
+pub trait DataOptLike:
+    Sealed + DataLike + From<Option<Self::Some>> + Into<Option<Self::Some>>
+{
     type Some: DataSomeLike;
 
     /// Returns some new, empty data.
@@ -321,7 +338,7 @@ pub trait DataOptLike: DataLike + From<Option<Self::Some>> + Into<Option<Self::S
 /// A piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Data`], [`DataRef`], and [`DataCow`].
-pub trait DataSomeLike: DataLike + for<'a> ToRef<'a, DataRef<'a>> {
+pub trait DataSomeLike: Sealed + DataLike + for<'a> ToRef<'a, DataRef<'a>> {
     /// Creates an owned [`Data`] struct by allocating this data if necessary.
     #[must_use]
     fn into_owned(self) -> Data;
@@ -334,7 +351,7 @@ pub trait DataSomeLike: DataLike + for<'a> ToRef<'a, DataRef<'a>> {
 /// A potentially optional piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Data`], [`DataRef`], [`DataCow`], [`DataOpt`], [`DataOptRef`], and [`DataOptCow`].
-pub trait DataLike: Sized {
+pub trait DataLike: Sealed + Sized {
     /// Takes a reference to the underlying [`Data::Text`] or [`Data::Link`] if this is one, or returns [`None`].
     #[must_use]
     fn as_string(&self) -> Option<&str>;
@@ -367,6 +384,8 @@ macro_rules! data_opt {
         #[doc = concat!("See [`", stringify!($from), "`], [`DataLike`], and [`DataOptLike`].")]
         #[derive(Clone, Debug)]
         pub struct $to $($lt)* (pub Option<$from $($lt)*>);
+
+        impl $($lt)* Sealed for $to $($lt)* {}
 
         impl $($lt)* DataOptLike for $to $($lt)* {
             type Some = $from $($lt)*;
@@ -452,6 +471,8 @@ pub enum Data {
     InvolvedPeople(InvolvedPeople),
     Object(Object),
 }
+
+impl Sealed for Data {}
 
 impl From<Object> for Data {
     fn from(v: Object) -> Self {
@@ -644,6 +665,8 @@ pub enum DataRef<'a> {
     Object(ObjectRef<'a>),
 }
 
+impl Sealed for DataRef<'_> {}
+
 impl DataRef<'_> {
     pub fn into_owned(self) -> Data {
         match self {
@@ -772,6 +795,8 @@ pub enum DataCow<'a> {
     Owned(Data),
     Ref(DataRef<'a>),
 }
+
+impl Sealed for DataCow<'_> {}
 
 impl<'a> From<DataRef<'a>> for DataCow<'a> {
     fn from(v: DataRef<'a>) -> Self {
