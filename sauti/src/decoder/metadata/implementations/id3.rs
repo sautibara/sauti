@@ -50,26 +50,27 @@ enum Id {
     Unknown(Arc<str>),
 }
 
-fn convert_sauti_to_id3_id(id: FrameId) -> Id {
+fn convert_sauti_to_id3_id(id: FrameId) -> Option<Id> {
     match id {
-        FrameId::Title => Id::Text("TIT2"),
-        FrameId::Album => Id::Text("TALB"),
-        FrameId::Artist => Id::Text("TPE1"),
-        FrameId::AlbumArtist => Id::Text("TPE2"),
-        FrameId::InvolvedPeople => Id::InvolvedPeople,
+        FrameId::Title => Some(Id::Text("TIT2")),
+        FrameId::Album => Some(Id::Text("TALB")),
+        FrameId::Artist => Some(Id::Text("TPE1")),
+        FrameId::AlbumArtist => Some(Id::Text("TPE2")),
+        FrameId::InvolvedPeople => Some(Id::InvolvedPeople),
         FrameId::Picture(picture_type) => {
-            Id::Picture(convert_sauti_to_id3_picture_type(picture_type))
+            Some(Id::Picture(convert_sauti_to_id3_picture_type(picture_type)))
         }
-        FrameId::CustomObject(string) => Id::Object(string),
-        FrameId::CustomText(string) => Id::CustomText(string),
-        FrameId::CustomLink(string) => Id::CustomLink(string),
-        FrameId::Unknown(string) => Id::Unknown(string),
+        FrameId::CustomObject(string) => Some(Id::Object(string)),
+        FrameId::CustomText(string) => Some(Id::CustomText(string)),
+        FrameId::CustomLink(string) => Some(Id::CustomLink(string)),
+        FrameId::Unknown(string) => Some(Id::Unknown(string)),
+        FrameId::Duration => None,
     }
 }
 
 fn convert_sauti_to_id3_data(data: Data) -> Result<id3::Content, Data> {
     match data {
-        unsupported @ Data::Unsupported { .. } => Err(unsupported),
+        unsupported @ (Data::Unsupported { .. } | Data::Duration(_)) => Err(unsupported),
         Data::Text(string) => Ok(id3::Content::Text(string)),
         Data::Link(string) => Ok(id3::Content::Link(string)),
         Data::Picture(picture) => {
@@ -420,7 +421,11 @@ impl Tag {
 
 impl super::super::Tag for Tag {
     fn get(&self, id: FrameId) -> DataOptCow<'_> {
-        match convert_sauti_to_id3_id(id) {
+        let id = convert_sauti_to_id3_id(id);
+        let Some(id) = id else {
+            return DataOptCow::from_option(None);
+        };
+        match id {
             Id::Text(ident) => self.get_text(ident),
             Id::Unknown(ident) => self.get_text(&ident),
             Id::Picture(picture_type) => {
@@ -448,6 +453,9 @@ impl super::super::Tag for Tag {
 
     fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
         let id = convert_sauti_to_id3_id(id);
+        let Some(id) = id else {
+            return Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>;
+        };
         match id {
             Id::Text(id) => {
                 let iter = self.get_text_all(id);
@@ -488,10 +496,11 @@ impl super::super::Tag for Tag {
     }
 
     fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
-        let res = match (
-            convert_sauti_to_id3_id(id.clone()),
-            convert_sauti_to_id3_data(data),
-        ) {
+        let id3_id = convert_sauti_to_id3_id(id.clone());
+        let Some(id3_id) = id3_id else {
+            return Ok(());
+        };
+        let res = match (id3_id, convert_sauti_to_id3_data(data)) {
             (Id::Text(ident), Ok(content @ (Content::Text(_) | Content::Link(_)))) => {
                 self.tag.add_frame(id3::Frame::with_content(ident, content));
                 Ok(())
@@ -536,7 +545,13 @@ impl super::super::Tag for Tag {
                 Err(("expected Data::InvolvedPeople", content))
             }
             (Id::Object(_), content @ Ok(_)) => Err(("expected Data::Object", content)),
-            (_, content @ Err(_)) => Err(("cannot add unsupported data back to a tag", content)),
+            (_, content @ Err(Data::Unsupported { .. })) => {
+                Err(("cannot add unsupported data back to a tag", content))
+            }
+            (_, content @ Err(Data::Duration(_))) => {
+                Err(("id3 does not support the duration datatype", content))
+            }
+            (_, Err(_)) => unreachable!(),
         };
 
         res.map_err(move |(reason, content)| {
@@ -563,7 +578,12 @@ impl super::super::Tag for Tag {
             }
         }
 
-        let data = match (convert_sauti_to_id3_id(id.clone()), data) {
+        let id3_id = convert_sauti_to_id3_id(id.clone());
+        let Some(id3_id) = id3_id else {
+            return Ok(());
+        };
+
+        let data = match (id3_id, data) {
             (Id::Text(ident), Data::Text(text)) => {
                 let text = add_to_previous_string(text, &self.tag, ident);
                 Data::Text(text)
@@ -579,7 +599,12 @@ impl super::super::Tag for Tag {
     }
 
     fn remove(&mut self, id: FrameId) {
-        match convert_sauti_to_id3_id(id) {
+        let id = convert_sauti_to_id3_id(id);
+        let Some(id) = id else {
+            return;
+        };
+
+        match id {
             Id::Text(ident) => {
                 self.tag.remove(ident);
             }

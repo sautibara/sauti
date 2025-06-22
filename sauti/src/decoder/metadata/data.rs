@@ -1,6 +1,6 @@
 //! Different types of metadata that can be decoded from an audio file.
 
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use gat_borrow::{IntoOwnedImpl, Reborrow, ToRef};
 
@@ -16,27 +16,29 @@ mod sealed {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FrameId {
-    /// The text title of the song.
+    /// The text title of the song ([`DataType::Text`]).
     Title,
-    /// The album that the song is in.
+    /// The album that the song is in ([`DataType::Text`]).
     Album,
-    /// The artist, including featured artists, of the specific song.
+    /// The artist, including featured artists, of the specific song ([`DataType::Text`]).
     Artist,
-    /// The artist of the entire album.
+    /// The artist of the entire album ([`DataType::Text`]).
     AlbumArtist,
+    /// The duration of the media file ([`DataType::Duration`]).
+    Duration,
     /// The list of everyone involved with the creation of the song as well as their roles - see
-    /// [`InvolvedPeople`].
+    /// [`InvolvedPeople`] ([`DataType::InvolvedPeople`]).
     InvolvedPeople,
-    /// A specific picture associated with the song, such as the album art.
+    /// A specific picture associated with the song, such as the album art ([`DataType::Picture`]).
     Picture(PictureType),
-    /// An application-specific binary object, identified by a key.
+    /// An application-specific binary object, identified by a key ([`DataType::Object`]).
     CustomObject(Arc<str>),
-    /// An application-specific string, identified by a key.
+    /// An application-specific string, identified by a key ([`DataType::Text`]).
     CustomText(Arc<str>),
-    /// An application-specific link, identified by a key.
+    /// An application-specific link, identified by a key ([`DataType::Link`]).
     CustomLink(Arc<str>),
     /// An unknown id, specific to the background implementation. For example, this will likely be
-    /// four letters for an id3 id.
+    /// four letters for an id3 id (arbitrary datatype).
     Unknown(Arc<str>),
 }
 
@@ -456,6 +458,7 @@ pub enum DataType {
     Picture,
     InvolvedPeople,
     Object,
+    Duration,
 }
 
 /// An owned piece of metadata associated with a [`Tag`](super::Tag).
@@ -470,6 +473,7 @@ pub enum Data {
     Picture(Picture),
     InvolvedPeople(InvolvedPeople),
     Object(Object),
+    Duration(Duration),
 }
 
 impl Sealed for Data {}
@@ -498,6 +502,12 @@ impl From<String> for Data {
     }
 }
 
+impl From<Duration> for Data {
+    fn from(v: Duration) -> Self {
+        Self::Duration(v)
+    }
+}
+
 impl<'a> ToRef<'a, DataRef<'a>> for Data {
     fn to_ref(&self) -> DataRef<'_> {
         match self {
@@ -509,6 +519,7 @@ impl<'a> ToRef<'a, DataRef<'a>> for Data {
             Self::Picture(owned) => DataRef::Picture(owned.to_ref()),
             Self::InvolvedPeople(people) => DataRef::InvolvedPeople(people.to_ref()),
             Self::Object(object) => DataRef::Object(object.to_ref()),
+            Self::Duration(duration) => DataRef::Duration(*duration),
         }
     }
 }
@@ -526,6 +537,7 @@ impl DataSomeLike for Data {
             Self::Picture(_) => Some(DataType::Picture),
             Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
             Self::Object(_) => Some(DataType::Object),
+            Self::Duration(_) => Some(DataType::Duration),
         }
     }
 }
@@ -663,6 +675,7 @@ pub enum DataRef<'a> {
     Picture(PictureRef<'a>),
     InvolvedPeople(InvolvedPeopleRef<'a>),
     Object(ObjectRef<'a>),
+    Duration(Duration),
 }
 
 impl Sealed for DataRef<'_> {}
@@ -678,6 +691,7 @@ impl DataRef<'_> {
             Self::Picture(reference) => Data::Picture(reference.into_owned()),
             Self::InvolvedPeople(people) => Data::InvolvedPeople(people.into_owned()),
             Self::Object(object) => Data::Object(object.into_owned()),
+            Self::Duration(duration) => Data::Duration(duration),
         }
     }
 }
@@ -703,6 +717,12 @@ impl<'a> From<PictureRef<'a>> for DataRef<'a> {
 impl<'a> From<&'a str> for DataRef<'a> {
     fn from(v: &'a str) -> Self {
         Self::Text(v)
+    }
+}
+
+impl From<Duration> for DataRef<'_> {
+    fn from(v: Duration) -> Self {
+        Self::Duration(v)
     }
 }
 
@@ -733,6 +753,7 @@ impl DataSomeLike for DataRef<'_> {
             Self::Picture(_) => Some(DataType::Picture),
             Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
             Self::Object(_) => Some(DataType::Object),
+            Self::Duration(_) => Some(DataType::Duration),
         }
     }
 }
