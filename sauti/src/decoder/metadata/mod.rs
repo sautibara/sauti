@@ -32,13 +32,73 @@ pub use data::{Data, DataCow, DataRef, Frame, FrameCow, FrameId, FrameRef};
 pub mod data_iter;
 pub mod frame_iter;
 
-/// The output type of [`default`]
-pub type Default = implementations::id3::Decoder;
+/// A wrapper around the default [`Decoder`], see [`default`].
+pub struct Default(List<implementations::id3::Decoder, super::symphonia::Symphonia>);
+
+/// A wrapper around the default [`Tag`], see [`default`].
+pub struct DefaultTag(TagList<implementations::id3::Tag, super::symphonia::Stream>);
+
+impl Decoder for Default {
+    type Tag = DefaultTag;
+
+    fn read_fallible(&self, source: &MediaSource) -> MetadataResult<Option<Self::Tag>> {
+        self.0.read_fallible(source).map(|opt| opt.map(DefaultTag))
+    }
+
+    fn read(&self, source: &MediaSource) -> MetadataResult<Self::Tag> {
+        self.0.read(source).map(DefaultTag)
+    }
+
+    fn supported_extensions(&self) -> ExtensionSet {
+        self.0.supported_extensions()
+    }
+}
+
+impl Tag for DefaultTag {
+    fn has(&self, id: FrameId) -> bool {
+        self.0.has(id)
+    }
+
+    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+        self.0.get(id)
+    }
+
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+        self.0.get_all(id)
+    }
+
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        self.0.replace(id, data)
+    }
+
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        self.0.add(id, data)
+    }
+
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        self.0.remove(id)
+    }
+
+    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+        self.0.frames()
+    }
+
+    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
+        self.0.save(path)
+    }
+
+    fn supports(&self, query: Operation) -> bool {
+        self.0.supports(query)
+    }
+}
 
 /// Get the default [`Decoder`]
 #[must_use]
 pub fn default() -> self::Default {
-    implementations::id3::Decoder::new()
+    self::Default(List::new(
+        implementations::id3::Decoder::new(),
+        super::symphonia::Symphonia::default(),
+    ))
 }
 
 /// A type that can [`read`](Self::read) and decode the metadata of a [`MediaSource`], returning a
@@ -175,10 +235,11 @@ impl Decoder for Box<dyn DynDecoder> {
 }
 
 /// Represents an operation that can be performed on a [`Tag`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Operation {
     Get(FrameId),
     GetAll(FrameId),
+    Replace(FrameId),
     Add(FrameId),
     Remove(FrameId),
     Data(DataType),
@@ -190,7 +251,11 @@ impl Operation {
     #[must_use]
     pub const fn frame_id(&self) -> Option<&FrameId> {
         match self {
-            Self::Get(id) | Self::GetAll(id) | Self::Add(id) | Self::Remove(id) => Some(id),
+            Self::Get(id)
+            | Self::GetAll(id)
+            | Self::Add(id)
+            | Self::Remove(id)
+            | Self::Replace(id) => Some(id),
             _ => None,
         }
     }
@@ -453,6 +518,250 @@ impl Tag for Box<dyn DynTag> {
     }
 }
 
+/// A combination of two [`Decoder`]s.
+pub struct List<C: Decoder, N: Decoder> {
+    current: C,
+    next: N,
+}
+
+impl<C: Decoder, N: Decoder> List<C, N> {
+    /// Create a new [`List`] between two decoders, giving `priority` the priority in methods if necessary.
+    pub const fn new(priority: C, rest: N) -> Self {
+        Self {
+            current: priority,
+            next: rest,
+        }
+    }
+
+    /// Add `other` to the list, giving it the least priority.
+    pub fn then<O: Decoder>(self, other: O) -> List<C, List<N, O>> {
+        List {
+            current: self.current,
+            next: List {
+                current: self.next,
+                next: other,
+            },
+        }
+    }
+}
+
+impl<C: Decoder, N: Decoder> Decoder for List<C, N> {
+    type Tag = TagList<C::Tag, N::Tag>;
+
+    fn read(&self, source: &MediaSource) -> MetadataResult<Self::Tag> {
+        let current_read = self.current.read(source);
+        let next_read = self.next.read(source);
+        match (current_read, next_read) {
+            (Err(current_err), Err(next_err)) => Err(MetadataError::List(
+                Box::new(current_err),
+                Box::new(next_err),
+            )),
+            (current_read, next_read) => Ok(TagList {
+                current: current_read.ok(),
+                next: next_read.ok(),
+            }),
+        }
+    }
+
+    fn supported_extensions(&self) -> ExtensionSet {
+        &self.current.supported_extensions() | &self.next.supported_extensions()
+    }
+}
+
+enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<I, L: Iterator<Item = I>, R: Iterator<Item = I>> Iterator for Either<L, R> {
+    type Item = I;
+
+    fn next(&mut self) -> Option<I> {
+        match self {
+            Self::Left(left) => left.next(),
+            Self::Right(right) => right.next(),
+        }
+    }
+}
+
+/// The [`Tag`] for [`List`].
+pub struct TagList<C: Tag, N: Tag> {
+    current: Option<C>,
+    next: Option<N>,
+}
+
+impl<C: Tag, N: Tag> Tag for TagList<C, N> {
+    fn has(&self, id: FrameId) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|current| current.has(id.clone()))
+            || self.next.as_ref().is_some_and(|next| next.has(id))
+    }
+
+    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+        (self
+            .current
+            .as_ref()
+            .and_then(|current| current.get(id.clone()).into_option()))
+        .or_else(|| {
+            self.next
+                .as_ref()
+                .and_then(|next| next.get(id).into_option())
+        })
+        .into()
+    }
+
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+        if let Some(current) = self.current.as_ref() {
+            if current.supports(Operation::GetAll(id.clone())) {
+                return Either::Left(current.get_all(id));
+            }
+        }
+
+        if let Some(next) = self.next.as_ref() {
+            if next.supports(Operation::GetAll(id.clone())) {
+                return Either::Right(Either::Left(next.get_all(id)));
+            }
+        }
+
+        Either::Right(Either::Right(std::iter::empty()))
+    }
+
+    fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        let Some(data_type) = data.data_type() else {
+            return Err(MetadataError::InvalidDataType {
+                id,
+                reason: Some("cannot replace with Unsupported data".to_string()),
+                recovered_data: Box::new(data.into()),
+            });
+        };
+
+        match (
+            self.current.as_mut().filter(|current| {
+                current.supports(Operation::Replace(id.clone()))
+                    && current.supports(Operation::Data(data_type))
+            }),
+            self.next.as_mut().filter(|next| {
+                next.supports(Operation::Replace(id.clone()))
+                    && next.supports(Operation::Data(data_type))
+            }),
+        ) {
+            (Some(current), Some(next)) => {
+                current.replace(id.clone(), data.clone())?;
+                next.replace(id, data)?;
+                Ok(())
+            }
+            (Some(current), None) => {
+                current.replace(id, data)?;
+                Ok(())
+            }
+            (None, Some(next)) => {
+                next.replace(id, data)?;
+                Ok(())
+            }
+            (None, None) => Err(MetadataError::Unimplemented(Operation::Replace(id))),
+        }
+    }
+
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        let Some(data_type) = data.data_type() else {
+            return Err(MetadataError::InvalidDataType {
+                id,
+                reason: Some("cannot add Unsupported data".to_string()),
+                recovered_data: Box::new(data.into()),
+            });
+        };
+
+        match (
+            self.current.as_mut().filter(|current| {
+                current.supports(Operation::Add(id.clone()))
+                    && current.supports(Operation::Data(data_type))
+            }),
+            self.next.as_mut().filter(|next| {
+                next.supports(Operation::Add(id.clone()))
+                    && next.supports(Operation::Data(data_type))
+            }),
+        ) {
+            (Some(current), Some(next)) => {
+                current.add(id.clone(), data.clone())?;
+                next.add(id, data)?;
+                Ok(())
+            }
+            (Some(current), None) => {
+                current.add(id, data)?;
+                Ok(())
+            }
+            (None, Some(next)) => {
+                next.add(id, data)?;
+                Ok(())
+            }
+            (None, None) => Err(MetadataError::Unimplemented(Operation::Add(id))),
+        }
+    }
+
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        let mut supports = false;
+
+        if let Some(current) = self.current.as_mut() {
+            if current.supports(Operation::Remove(id.clone())) {
+                current.remove(id.clone())?;
+                supports = true;
+            }
+        }
+
+        if let Some(next) = self.next.as_mut() {
+            if next.supports(Operation::Remove(id.clone())) {
+                next.remove(id.clone())?;
+                supports = true;
+            }
+        }
+
+        if supports {
+            Ok(())
+        } else {
+            Err(MetadataError::Unimplemented(Operation::Remove(id)))
+        }
+    }
+
+    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+        (self.current.as_ref().into_iter().flat_map(Tag::frames))
+            .chain(self.next.as_ref().into_iter().flat_map(Tag::frames))
+    }
+
+    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
+        let path_ref = path.as_ref();
+
+        let mut supports = false;
+
+        if let Some(current) = self.current.as_ref() {
+            if current.supports(Operation::Save) {
+                current.save(path_ref)?;
+                supports = true;
+            }
+        }
+
+        if let Some(next) = self.next.as_ref() {
+            if next.supports(Operation::Save) {
+                next.save(path_ref)?;
+                supports = true;
+            }
+        }
+
+        if supports {
+            Ok(())
+        } else {
+            Err(MetadataError::Unimplemented(Operation::Save))
+        }
+    }
+
+    fn supports(&self, query: Operation) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|current| current.supports(query.clone()))
+            || self.next.as_ref().is_some_and(|next| next.supports(query))
+    }
+}
+
 /// A result of an operation on a [`Decoder`]
 pub type MetadataResult<T> = Result<T, MetadataError>;
 
@@ -495,6 +804,8 @@ pub enum MetadataError {
     Unimplemented(Operation),
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("{:?}\n{:?}", .0, .1)]
+    List(Box<Self>, Box<Self>),
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]
     Other(Option<String>),
 }
