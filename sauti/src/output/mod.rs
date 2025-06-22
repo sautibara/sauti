@@ -54,6 +54,7 @@
 
 use std::ops::Deref;
 
+use prelude::StreamSpec;
 use thiserror::Error;
 
 mod cpal_impl;
@@ -339,10 +340,11 @@ impl DeviceInfo {
 
 impl std::default::Default for DeviceInfo {
     fn default() -> Self {
+        let default_stream_spec = StreamSpec::default();
         Self {
             sample_format: SampleFormat::F32,
-            sample_rate: 44100,
-            channels: 2,
+            sample_rate: default_stream_spec.sample_rate,
+            channels: default_stream_spec.channels,
         }
     }
 }

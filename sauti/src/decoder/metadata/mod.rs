@@ -174,8 +174,9 @@ impl Decoder for Box<dyn DynDecoder> {
     }
 }
 
-/// Represents an operation that can be performed on a [`Tag`] to determine if it supports it or not.
-pub enum Supports {
+/// Represents an operation that can be performed on a [`Tag`]
+#[derive(Debug)]
+pub enum Operation {
     Get(FrameId),
     GetAll(FrameId),
     Add(FrameId),
@@ -185,7 +186,7 @@ pub enum Supports {
     Save,
 }
 
-impl Supports {
+impl Operation {
     #[must_use]
     pub const fn frame_id(&self) -> Option<&FrameId> {
         match self {
@@ -214,7 +215,11 @@ pub trait Tag {
     }
 
     /// Returns a iterator over the [`Data`] of all frames with a specific [`FrameId`].
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow>;
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+        self.frames()
+            .filter(move |frame| frame.id == id)
+            .map(|frame| frame.data)
+    }
 
     /// Replaces the [`Data`] for `id` with `data`. This removes any old data and adds `data` in
     /// its place.
@@ -223,7 +228,7 @@ pub trait Tag {
     ///
     /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
     fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
-        self.remove(id.clone());
+        self.remove(id.clone())?;
         self.add(id, data)
     }
 
@@ -234,10 +239,20 @@ pub trait Tag {
     /// # Errors
     ///
     /// - [`MetadataError::InvalidDataType`] if `id` doesn't support `data`.
-    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()>;
+    /// - [`MetadataError::Unimplemented`] if the underlying tag doesn't support adding data
+    fn add(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
+        let _ = data;
+        Err(MetadataError::Unimplemented(Operation::Add(id)))
+    }
 
     /// Removes all [`Data`] for a specific [`FrameId`].
-    fn remove(&mut self, id: FrameId);
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::Unimplemented`] if the underlying tag doesn't support removing data
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        Err(MetadataError::Unimplemented(Operation::Remove(id)))
+    }
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
     fn frames(&self) -> impl Iterator<Item = FrameCow>;
@@ -247,13 +262,17 @@ pub trait Tag {
     /// # Errors
     ///
     /// - Any backend-specific errors.
-    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()>;
+    /// - [`MetadataError::Unimplemented`] if the underlying tag doesn't support saving
+    fn save(&self, path: impl AsRef<Path>) -> MetadataResult<()> {
+        let _ = path;
+        Err(MetadataError::Unimplemented(Operation::Save))
+    }
 
     /// Returns `true` if this [`Tag`] may support the operation of `query`.
     ///
     /// This should not actually perform the query itself, it should only return `false` if there
     /// is no chance of the tag supporting the query.
-    fn supports(&self, query: Supports) -> bool;
+    fn supports(&self, query: Operation) -> bool;
 }
 
 /// A object safe version of [`Tag`] - a trait that represents the read metadata of a file.
@@ -292,7 +311,11 @@ pub trait DynTag {
     fn dyn_add(&mut self, id: FrameId, data: Data) -> MetadataResult<()>;
 
     /// Removes all [`Data`] for a specific [`FrameId`].
-    fn dyn_remove(&mut self, id: FrameId);
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::Unimplemented`] if the underlying tag doesn't support removing data
+    fn dyn_remove(&mut self, id: FrameId) -> MetadataResult<()>;
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
     fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_>;
@@ -308,7 +331,7 @@ pub trait DynTag {
     ///
     /// This should not actually perform the query itself, it should only return `false` if there
     /// is no chance of the tag supporting the query.
-    fn dyn_supports(&self, query: Supports) -> bool;
+    fn dyn_supports(&self, query: Operation) -> bool;
 }
 
 impl<T: Tag> DynTag for T {
@@ -333,8 +356,8 @@ impl<T: Tag> DynTag for T {
         <Self as Tag>::add(self, id, data)
     }
 
-    fn dyn_remove(&mut self, id: FrameId) {
-        <Self as Tag>::remove(self, id);
+    fn dyn_remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        <Self as Tag>::remove(self, id)
     }
 
     fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_> {
@@ -346,7 +369,7 @@ impl<T: Tag> DynTag for T {
         <Self as Tag>::save(self, path)
     }
 
-    fn dyn_supports(&self, query: Supports) -> bool {
+    fn dyn_supports(&self, query: Operation) -> bool {
         <Self as Tag>::supports(self, query)
     }
 }
@@ -372,8 +395,8 @@ impl Tag for dyn DynTag {
         self.dyn_add(id, data)
     }
 
-    fn remove(&mut self, id: FrameId) {
-        self.dyn_remove(id);
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        self.dyn_remove(id)
     }
 
     fn frames(&self) -> impl Iterator<Item = FrameCow> {
@@ -384,7 +407,7 @@ impl Tag for dyn DynTag {
         self.dyn_save(path.as_ref())
     }
 
-    fn supports(&self, query: Supports) -> bool {
+    fn supports(&self, query: Operation) -> bool {
         self.dyn_supports(query)
     }
 }
@@ -413,8 +436,8 @@ impl Tag for Box<dyn DynTag> {
         (&mut **self).dyn_add(id, data)
     }
 
-    fn remove(&mut self, id: FrameId) {
-        (&mut **self).dyn_remove(id);
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        (&mut **self).dyn_remove(id)
     }
 
     fn frames(&self) -> impl Iterator<Item = FrameCow> {
@@ -425,7 +448,7 @@ impl Tag for Box<dyn DynTag> {
         (&**self).dyn_save(path.as_ref())
     }
 
-    fn supports(&self, query: Supports) -> bool {
+    fn supports(&self, query: Operation) -> bool {
         (&**self).dyn_supports(query)
     }
 }
@@ -447,6 +470,11 @@ pub enum MetadataError {
         source: SourceName,
         reason: Option<String>,
     },
+    #[error("malformed data in {source}: {}", reason.as_deref().unwrap_or("unknown"))]
+    MalformedData {
+        source: SourceName,
+        reason: Option<String>,
+    },
     #[error(
         "frame {id:?} given invalid data{}{}",
         reason.as_ref().map_or(
@@ -463,6 +491,8 @@ pub enum MetadataError {
         reason: Option<String>,
         recovered_data: Box<DataOpt>,
     },
+    #[error("unimplemented operation: {:?}", .0)]
+    Unimplemented(Operation),
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]

@@ -147,7 +147,10 @@ pub struct StreamSpec {
 
 impl Default for StreamSpec {
     fn default() -> Self {
-        DeviceInfo::default().into()
+        Self {
+            channels: 2,
+            sample_rate: 44100,
+        }
     }
 }
 

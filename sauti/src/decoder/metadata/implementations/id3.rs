@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use id3::{Content, TagLike};
 
+use crate::decoder::metadata::Operation;
+
 use super::super::prelude::*;
 
 #[derive(Default)]
@@ -548,8 +550,10 @@ impl super::super::Tag for Tag {
             (_, content @ Err(Data::Unsupported { .. })) => {
                 Err(("cannot add unsupported data back to a tag", content))
             }
-            (_, content @ Err(Data::Duration(_))) => {
-                Err(("id3 does not support the duration datatype", content))
+            (_, Err(Data::Duration(_))) => {
+                return Err(MetadataError::Unimplemented(Operation::Data(
+                    DataType::Duration,
+                )));
             }
             (_, Err(_)) => unreachable!(),
         };
@@ -598,10 +602,10 @@ impl super::super::Tag for Tag {
         self.replace(id, data)
     }
 
-    fn remove(&mut self, id: FrameId) {
-        let id = convert_sauti_to_id3_id(id);
-        let Some(id) = id else {
-            return;
+    fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
+        let id3_id = convert_sauti_to_id3_id(id.clone());
+        let Some(id) = id3_id else {
+            return Err(MetadataError::Unimplemented(Operation::Remove(id)));
         };
 
         match id {
@@ -642,6 +646,8 @@ impl super::super::Tag for Tag {
                 self.tag.remove(id);
             }
         }
+
+        Ok(())
     }
 
     fn frames(&self) -> impl Iterator<Item = FrameCow> {
@@ -654,7 +660,7 @@ impl super::super::Tag for Tag {
             .map_err(|err| MetadataError::Other(Some(err.description)))
     }
 
-    fn supports(&self, _: crate::decoder::metadata::Supports) -> bool {
+    fn supports(&self, _: crate::decoder::metadata::Operation) -> bool {
         true
     }
 }

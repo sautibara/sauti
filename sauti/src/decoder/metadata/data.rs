@@ -285,6 +285,24 @@ impl FrameLike for FrameCow<'_> {
     }
 }
 
+impl From<Frame> for FrameCow<'_> {
+    fn from(value: Frame) -> Self {
+        Self {
+            id: value.id,
+            data: DataCow::Owned(value.data),
+        }
+    }
+}
+
+impl<'a> From<FrameRef<'a>> for FrameCow<'a> {
+    fn from(value: FrameRef<'a>) -> Self {
+        Self {
+            id: value.id,
+            data: DataCow::Ref(value.data),
+        }
+    }
+}
+
 /// An optional piece of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`DataOpt`], [`DataOptRef`], and [`DataOptCow`].
@@ -431,6 +449,12 @@ macro_rules! data_opt {
             }
         }
 
+        impl $($lt)* From<$from $($lt)*> for $to $($lt)* {
+            fn from(val: $from $($lt)*) -> Self {
+                Self::from_option(Some(val))
+            }
+        }
+
         impl $($lt)* From<Option<$from $($lt)*>> for $to $($lt)* {
             fn from(val: Option<$from $($lt)*>) -> Self {
                 Self::from_option(val)
@@ -448,6 +472,18 @@ macro_rules! data_opt {
 data_opt!(from: Data, to: DataOpt, docs: "An optional, owned", lt: <>);
 data_opt!(from: DataRef, to: DataOptRef, docs: "An optional reference to", lt: <'a>);
 data_opt!(from: DataCow, to: DataOptCow, docs: "An optional, owned or referenced", lt: <'a>);
+
+impl From<Data> for DataOptCow<'_> {
+    fn from(value: Data) -> Self {
+        Self::from(DataCow::Owned(value))
+    }
+}
+
+impl<'a> From<DataRef<'a>> for DataOptCow<'a> {
+    fn from(value: DataRef<'a>) -> Self {
+        Self::from(DataCow::Ref(value))
+    }
+}
 
 /// Represents the different variants that [`Data`] can be, without concrete values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
