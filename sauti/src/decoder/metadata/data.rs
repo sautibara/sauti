@@ -395,6 +395,10 @@ pub trait DataLike: Sealed + Sized {
     /// Takes a reference to the underlying [`Data::Object`] if this is one, or returns [`None`].
     #[must_use]
     fn as_object(&self) -> Option<ObjectRef>;
+
+    /// Copies the underlying [`Data::Duration`] if this is one, or returns [`None`].
+    #[must_use]
+    fn as_duration(&self) -> Option<Duration>;
 }
 
 macro_rules! data_opt {
@@ -446,6 +450,10 @@ macro_rules! data_opt {
 
             fn as_object(&self) -> Option<ObjectRef> {
                 self.as_option().and_then(|opt| opt.as_object())
+            }
+
+            fn as_duration(&self) -> Option<Duration> {
+                self.as_option().and_then(|opt| opt.as_duration())
             }
         }
 
@@ -622,6 +630,14 @@ impl DataLike for Data {
     fn as_object(&self) -> Option<ObjectRef> {
         if let Self::Object(v) = self {
             Some(v.to_ref())
+        } else {
+            None
+        }
+    }
+
+    fn as_duration(&self) -> Option<Duration> {
+        if let Self::Duration(v) = self {
+            Some(*v)
         } else {
             None
         }
@@ -842,6 +858,14 @@ impl DataLike for DataRef<'_> {
             None
         }
     }
+
+    fn as_duration(&self) -> Option<Duration> {
+        if let Self::Duration(v) = self {
+            Some(*v)
+        } else {
+            None
+        }
+    }
 }
 
 /// An owned or referenced piece of metadata associated with a [`Tag`](super::Tag).
@@ -921,6 +945,10 @@ impl DataLike for DataCow<'_> {
 
     fn as_object(&self) -> Option<ObjectRef> {
         child_call!(self.child.as_object())
+    }
+
+    fn as_duration(&self) -> Option<Duration> {
+        child_call!(self.child.as_duration())
     }
 }
 

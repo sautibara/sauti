@@ -33,6 +33,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Track: '{title}' by '{artists}' in '{album}'");
 
+    let duration = metadata.get(FrameId::Duration);
+    if let Some(duration) = duration.as_duration() {
+        println!(
+            "Duration: {}:{}",
+            duration.as_secs() / 60,
+            duration.as_secs() % 60
+        )
+    }
+
     println!();
 
     for frame in metadata.frames() {
