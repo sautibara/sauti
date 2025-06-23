@@ -411,6 +411,7 @@ impl super::metadata::Tag for Stream {
         }))
     }
 
+    #[inline]
     fn supports(&self, query: Operation) -> bool {
         matches!(
             query,

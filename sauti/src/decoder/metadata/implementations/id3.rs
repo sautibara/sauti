@@ -660,7 +660,13 @@ impl super::super::Tag for Tag {
             .map_err(|err| MetadataError::Other(Some(err.description)))
     }
 
-    fn supports(&self, _: crate::decoder::metadata::Operation) -> bool {
-        true
+    #[inline]
+    fn supports(&self, operation: Operation) -> bool {
+        !matches!(
+            operation,
+            Operation::Data(DataType::Duration)
+                | Operation::Get(FrameId::Duration)
+                | Operation::GetAll(FrameId::Duration)
+        )
     }
 }
