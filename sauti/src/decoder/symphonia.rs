@@ -425,7 +425,7 @@ impl super::metadata::Tag for Stream {
 
 use symphonia::core::errors::Error as SymphoniaError;
 
-pub enum GenericError {
+enum GenericError {
     Symphonia {
         error: SymphoniaError,
         source: SourceName,

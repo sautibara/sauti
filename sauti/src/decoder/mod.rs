@@ -10,7 +10,7 @@ pub mod audio;
 #[cfg(feature = "metadata-decoder")]
 pub mod metadata;
 
-mod symphonia;
+pub mod symphonia;
 
 /// A decoder implemented using [`symphonia`](::symphonia)
 pub use symphonia::Symphonia;
