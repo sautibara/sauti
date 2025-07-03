@@ -10,12 +10,12 @@
 //! # Examples
 //!
 //! ```
-//! use sauti::decoder::prelude::*;
+//! use sauti::decoder::audio::prelude::*;
 //!
-//! let decoder = sauti::decoder::default();
+//! let decoder = sauti::decoder::audio::default();
 //!
 //! // the test file holds a 22050hz square wave (switches every sample)
-//! let source = MediaSource::copy_buf(include_bytes!("../test/test_file.flac"));
+//! let source = MediaSource::copy_buf(include_bytes!("../../test/test_file.flac"));
 //! let file = (decoder.read(&source))
 //!     .and_then(|mut file| file.decode_all())
 //!     .expect("failed to decode file")

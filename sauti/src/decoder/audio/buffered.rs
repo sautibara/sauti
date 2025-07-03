@@ -5,7 +5,7 @@
 //! # Examples
 //!
 //! ```
-//! use sauti::decoder::prelude::*;
+//! use sauti::decoder::audio::prelude::*;
 //! use sauti::test::prelude::*;
 //! # fn main() -> DecoderResult<()> {
 //!
