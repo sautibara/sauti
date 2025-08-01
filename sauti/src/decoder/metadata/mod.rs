@@ -35,9 +35,11 @@ pub mod frame_iter;
 
 /// A wrapper around the default [`Decoder`], see [`default`].
 pub struct Default(List<implementations::id3::Decoder, super::symphonia::Symphonia>);
+// pub struct Default(implementations::id3::Decoder);
 
 /// A wrapper around the default [`Tag`], see [`default`].
 pub struct DefaultTag(TagList<implementations::id3::Tag, super::symphonia::Stream>);
+// pub struct DefaultTag(implementations::id3::Tag);
 
 impl Decoder for Default {
     type Tag = DefaultTag;
@@ -60,11 +62,11 @@ impl Tag for DefaultTag {
         self.0.has(id)
     }
 
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
         self.0.get(id)
     }
 
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
         self.0.get_all(id)
     }
 
@@ -80,7 +82,7 @@ impl Tag for DefaultTag {
         self.0.remove(id)
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         self.0.frames()
     }
 
@@ -96,6 +98,7 @@ impl Tag for DefaultTag {
 /// Get the default [`Decoder`]
 #[must_use]
 pub fn default() -> self::Default {
+    // self::Default(implementations::id3::Decoder::new())
     self::Default(List::new(
         implementations::id3::Decoder::new(),
         super::symphonia::Symphonia::default(),
@@ -272,19 +275,17 @@ pub trait Tag {
         self.get(id).is_some()
     }
 
-    /// Returns the [`Data`] of the first frame with a specific [`FrameId`].
+    /// Returns the [`Frame`] first frame with a specific [`FrameId`].
     ///
     /// This can be either a reference to the inner metadata (as a [`DataCow::Ref`]) or an owned
     /// object created from the inner metadata (as a [`DataCow::Owned`]).
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
-        DataOptCow::from_option(self.get_all(id).next())
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
+        FrameOptCow::from_option(self.get_all(id).next())
     }
 
-    /// Returns a iterator over the [`Data`] of all frames with a specific [`FrameId`].
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
-        self.frames()
-            .filter(move |frame| frame.id == id)
-            .map(|frame| frame.data)
+    /// Returns a iterator over all frames with a specific [`FrameId`].
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
+        self.frames().filter(move |frame| frame.id == id)
     }
 
     /// Replaces the [`Data`] for `id` with `data`. This removes any old data and adds `data` in
@@ -321,7 +322,7 @@ pub trait Tag {
     }
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
-    fn frames(&self) -> impl Iterator<Item = FrameCow>;
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>>;
 
     /// Saves this tag to the file at `path`.
     ///
@@ -354,10 +355,10 @@ pub trait DynTag {
     ///
     /// This can be either a reference to the inner metadata (as a [`DataCow::Ref`]) or an owned
     /// object created from the inner metadata (as a [`DataCow::Owned`]).
-    fn dyn_get(&self, id: FrameId) -> DataOptCow<'_>;
+    fn dyn_get(&self, id: FrameId) -> FrameOptCow<'_>;
 
     /// Returns an iterator over the [`Data`] of all frames with a specific [`FrameId`].
-    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_>;
+    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = FrameCow<'_>> + '_>;
 
     /// Replaces the [`Data`] for `id` with `data`. This removes any old data and adds `data` in
     /// its place.
@@ -384,7 +385,7 @@ pub trait DynTag {
     fn dyn_remove(&mut self, id: FrameId) -> MetadataResult<()>;
 
     /// Returns an iterator over the [`Frame`]s of this metadata.
-    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_>;
+    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow<'_>> + '_>;
 
     /// Saves this tag to the file at `path`.
     ///
@@ -405,11 +406,11 @@ impl<T: Tag> DynTag for T {
         <Self as Tag>::has(self, id)
     }
 
-    fn dyn_get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn dyn_get(&self, id: FrameId) -> FrameOptCow<'_> {
         <Self as Tag>::get(self, id)
     }
 
-    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = DataCow> + '_> {
+    fn dyn_get_all(&self, id: FrameId) -> Box<dyn Iterator<Item = FrameCow<'_>> + '_> {
         let iter = <Self as Tag>::get_all(self, id);
         Box::new(iter)
     }
@@ -426,7 +427,7 @@ impl<T: Tag> DynTag for T {
         <Self as Tag>::remove(self, id)
     }
 
-    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow> + '_> {
+    fn dyn_frames(&self) -> Box<dyn Iterator<Item = FrameCow<'_>> + '_> {
         let iter = <Self as Tag>::frames(self);
         Box::new(iter)
     }
@@ -445,11 +446,11 @@ impl Tag for dyn DynTag {
         self.dyn_has(id)
     }
 
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
         self.dyn_get(id)
     }
 
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
         self.dyn_get_all(id)
     }
 
@@ -465,7 +466,7 @@ impl Tag for dyn DynTag {
         self.dyn_remove(id)
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         self.dyn_frames()
     }
 
@@ -486,11 +487,11 @@ impl Tag for Box<dyn DynTag> {
         (&**self).dyn_has(id)
     }
 
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
         (&**self).dyn_get(id)
     }
 
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
         (&**self).dyn_get_all(id)
     }
 
@@ -506,7 +507,7 @@ impl Tag for Box<dyn DynTag> {
         (&mut **self).dyn_remove(id)
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         (&**self).dyn_frames()
     }
 
@@ -599,7 +600,7 @@ impl<C: Tag, N: Tag> Tag for TagList<C, N> {
             || self.next.as_ref().is_some_and(|next| next.has(id))
     }
 
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
         (self
             .current
             .as_ref()
@@ -612,7 +613,7 @@ impl<C: Tag, N: Tag> Tag for TagList<C, N> {
         .into()
     }
 
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
         if let Some(current) = self.current.as_ref() {
             if current.supports(Operation::GetAll(id.clone())) {
                 return Either::Left(current.get_all(id));
@@ -724,7 +725,7 @@ impl<C: Tag, N: Tag> Tag for TagList<C, N> {
         }
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         (self.current.as_ref().into_iter().flat_map(Tag::frames))
             .chain(self.next.as_ref().into_iter().flat_map(Tag::frames))
     }
@@ -803,6 +804,16 @@ pub enum MetadataError {
     },
     #[error("unimplemented operation: {:?}", .0)]
     Unimplemented(Operation),
+    #[error(
+        "expected {expected:?} in {}, {}",
+        id.as_ref().map_or_else(|| "frame".to_owned(), |id| format!("frame {id:?}")),
+        found.as_ref().map_or_else(|| "was empty".to_owned(), |ty| format!("{ty:?}"))
+    )]
+    ExpectedData {
+        id: Option<FrameId>,
+        expected: DataType,
+        found: Option<DataType>,
+    },
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("{:?}\n{:?}", .0, .1)]

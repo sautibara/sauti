@@ -387,24 +387,27 @@ impl super::metadata::Tag for Stream {
         is_duration_tag(&id)
     }
 
-    fn get(&self, id: super::metadata::FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: super::metadata::FrameId) -> FrameOptCow<'_> {
         if is_duration_tag(&id) {
-            Data::Duration(self.times.duration()).into()
+            FrameOptCow::some(FrameCow {
+                data: DataCow::Owned(Data::Duration(self.times.duration())),
+                id,
+            })
         } else {
             None.into()
         }
     }
 
-    fn get_all(
-        &self,
-        id: super::metadata::FrameId,
-    ) -> impl Iterator<Item = super::metadata::DataCow> {
+    fn get_all(&self, id: super::metadata::FrameId) -> impl Iterator<Item = FrameCow<'_>> {
         is_duration_tag(&id)
-            .then(|| Data::Duration(self.times.duration()).into())
+            .then(|| FrameCow {
+                data: DataCow::Owned(Data::Duration(self.times.duration())),
+                id,
+            })
             .into_iter()
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         std::iter::once(FrameCow::from(Frame {
             id: FrameId::Duration,
             data: Data::Duration(self.times.duration()),

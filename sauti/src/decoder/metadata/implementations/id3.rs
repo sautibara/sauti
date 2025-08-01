@@ -110,17 +110,17 @@ fn convert_id3_to_sauti_data_owned(content: id3::Content) -> Data {
     }
 }
 
-fn convert_id3_to_sauti_data_optional(content: Option<&id3::Content>) -> DataOptCow {
+fn convert_id3_to_sauti_data_optional(content: Option<&id3::Content>) -> DataOptCow<'_> {
     content.map(convert_id3_to_sauti_data).into()
 }
 
-fn convert_id3_to_sauti_data(content: &id3::Content) -> DataCow {
+fn convert_id3_to_sauti_data(content: &id3::Content) -> DataCow<'_> {
     convert_id3_to_sauti_data_all(content)
         .next()
         .expect("should always return at least one piece of data")
 }
 
-fn convert_id3_to_sauti_data_all(content: &id3::Content) -> DataResult {
+fn convert_id3_to_sauti_data_all(content: &id3::Content) -> DataResult<'_> {
     match content {
         Content::Text(string)
         | Content::ExtendedText(id3::frame::ExtendedText { value: string, .. }) => {
@@ -165,7 +165,7 @@ impl<'a> Iterator for DataResult<'a> {
     }
 }
 
-fn convert_id3_to_sauti_frame_all(frame: &id3::frame::Frame) -> impl Iterator<Item = FrameCow> {
+fn convert_id3_to_sauti_frame_all(frame: &id3::frame::Frame) -> impl Iterator<Item = FrameCow<'_>> {
     let id = match (frame.id(), frame.content()) {
         ("TIT2", _) => FrameId::Title,
         ("TALB", _) => FrameId::Album,
@@ -302,7 +302,7 @@ fn convert_id3_to_sauti_ipl(ipl: &id3::frame::InvolvedPeopleList) -> InvolvedPeo
 
 fn convert_id3_to_iter_ipl(
     ipl: &id3::frame::InvolvedPeopleList,
-) -> impl Iterator<Item = InvolvedPersonRef> {
+) -> impl Iterator<Item = InvolvedPersonRef<'_>> {
     ipl.items.iter().map(|item| InvolvedPersonRef {
         name: &item.involvee,
         involvement: &item.involvement,
@@ -332,7 +332,7 @@ fn convert_sauti_to_id3_ipl(ipl: InvolvedPeople) -> id3::frame::InvolvedPeopleLi
     id3::frame::InvolvedPeopleList { items }
 }
 
-fn convert_id3_to_sauti_object(object: &id3::frame::EncapsulatedObject) -> ObjectRef {
+fn convert_id3_to_sauti_object(object: &id3::frame::EncapsulatedObject) -> ObjectRef<'_> {
     let id3::frame::EncapsulatedObject {
         mime_type,
         filename,
@@ -412,7 +412,7 @@ impl Tag {
         convert_id3_to_sauti_data_optional(content)
     }
 
-    fn get_text_all(&self, id: impl AsRef<str>) -> impl Iterator<Item = DataCow> {
+    fn get_text_all(&self, id: impl AsRef<str>) -> impl Iterator<Item = DataCow<'_>> {
         self.tag
             .frames()
             .filter(move |frame| frame.id() == id.as_ref())
@@ -422,12 +422,13 @@ impl Tag {
 }
 
 impl super::super::Tag for Tag {
-    fn get(&self, id: FrameId) -> DataOptCow<'_> {
+    fn get(&self, id: FrameId) -> FrameOptCow<'_> {
+        let sauti_id = id.clone();
         let id = convert_sauti_to_id3_id(id);
         let Some(id) = id else {
-            return DataOptCow::from_option(None);
+            return FrameOptCow::none();
         };
-        match id {
+        let data = match id {
             Id::Text(ident) => self.get_text(ident),
             Id::Unknown(ident) => self.get_text(&ident),
             Id::Picture(picture_type) => {
@@ -450,28 +451,27 @@ impl super::super::Tag for Tag {
             Id::CustomText(description) => self.custom_text(&description).into(),
             Id::CustomLink(description) => self.custom_link(&description).into(),
             Id::Object(description) => self.object(&description).into(),
-        }
+        };
+        FrameOptCow::from_components(sauti_id, data)
     }
 
-    fn get_all(&self, id: FrameId) -> impl Iterator<Item = DataCow> {
+    fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {
+        let sauti_id = id.clone();
         let id = convert_sauti_to_id3_id(id);
-        let Some(id) = id else {
-            return Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>;
-        };
-        match id {
-            Id::Text(id) => {
+        let data_iter = match id {
+            Some(Id::Text(id)) => {
                 let iter = self.get_text_all(id);
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::Unknown(id) => {
+            Some(Id::Unknown(id)) => {
                 let iter = self.get_text_all(id);
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::Picture(picture_type) => {
+            Some(Id::Picture(picture_type)) => {
                 let iter = self.pictures(picture_type);
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::InvolvedPeople => {
+            Some(Id::InvolvedPeople) => {
                 let iter = self
                     .tag
                     .involved_people_lists()
@@ -479,22 +479,27 @@ impl super::super::Tag for Tag {
                     .map(|ipl| DataCow::Ref(DataRef::InvolvedPeople(ipl)));
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::CustomText(description) => {
+            Some(Id::CustomText(description)) => {
                 let value = self.custom_text(&description);
                 let iter = value.into_iter();
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::CustomLink(description) => {
+            Some(Id::CustomLink(description)) => {
                 let value = self.custom_link(&description);
                 let iter = value.into_iter();
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Id::Object(description) => {
+            Some(Id::Object(description)) => {
                 let value = self.object(&description);
                 let iter = value.into_iter();
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-        }
+            None => Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>,
+        };
+        data_iter.map(move |data| FrameCow {
+            id: sauti_id.clone(),
+            data,
+        })
     }
 
     fn replace(&mut self, id: FrameId, data: Data) -> MetadataResult<()> {
@@ -650,7 +655,7 @@ impl super::super::Tag for Tag {
         Ok(())
     }
 
-    fn frames(&self) -> impl Iterator<Item = FrameCow> {
+    fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         self.tag.frames().flat_map(convert_id3_to_sauti_frame_all)
     }
 

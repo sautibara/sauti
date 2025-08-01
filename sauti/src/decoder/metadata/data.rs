@@ -5,6 +5,10 @@ use std::{fmt::Debug, sync::Arc, time::Duration};
 use gat_borrow::{IntoOwnedImpl, Reborrow, ToRef};
 
 use sealed::Sealed;
+
+use crate::decoder::metadata::MetadataResult;
+
+use super::MetadataError;
 mod sealed {
     pub trait Sealed {}
 }
@@ -42,13 +46,15 @@ pub enum FrameId {
     Unknown(Arc<str>),
 }
 
+pub trait FrameLike: Sealed + DataLike {}
+
 /// An optional [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`].
 pub trait FrameOptLike:
-    Sealed + Sized + From<Option<Self::Some>> + Into<Option<Self::Some>>
+    Sealed + FrameLike + Sized + From<Option<Self::Some>> + Into<Option<Self::Some>>
 {
-    type Some: FrameLike;
+    type Some: FrameSomeLike;
 
     /// Returns a new, empty frame.
     fn none() -> Self {
@@ -83,31 +89,31 @@ pub trait FrameOptLike:
 
     /// Returns a [`FrameRef`] pointing to this frame.
     #[must_use]
-    fn to_ref(&self) -> FrameOptRef {
+    fn to_ref(&self) -> FrameOptRef<'_> {
         self.as_option().map(ToRef::to_ref).into()
     }
 
     /// Creates an owned [`Frame`] struct by allocating this frame if necessary.
     #[must_use]
     fn into_owned(self) -> FrameOpt {
-        self.into_option().map(FrameLike::into_owned).into()
+        self.into_option().map(FrameSomeLike::into_owned).into()
     }
 
     /// Gets the key of the frame.
     fn id(&self) -> Option<&FrameId> {
-        self.as_option().map(FrameLike::id)
+        self.as_option().map(FrameSomeLike::id)
     }
 
     /// Gets the value of the frame.
-    fn data(&self) -> DataOptRef {
-        self.as_option().map(FrameLike::data).into()
+    fn data(&self) -> DataOptRef<'_> {
+        self.as_option().map(FrameSomeLike::data).into()
     }
 }
 
 /// A [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
 /// See [`Frame`], [`FrameRef`], and [`FrameCow`].
-pub trait FrameLike: Sealed + for<'a> ToRef<'a, FrameRef<'a>> {
+pub trait FrameSomeLike: Sealed + FrameLike + for<'a> ToRef<'a, FrameRef<'a>> {
     ///// Returns a [`FrameRef`] pointing to this frame.
     //#[must_use]
     //fn to_ref(&self) -> FrameRef;
@@ -120,52 +126,321 @@ pub trait FrameLike: Sealed + for<'a> ToRef<'a, FrameRef<'a>> {
     fn id(&self) -> &FrameId;
 
     /// Gets the value of the frame.
-    fn data(&self) -> DataRef;
+    fn data(&self) -> DataRef<'_>;
 }
 
+macro_rules! frame_impl_data_like {
+    (
+        for: $ty:ty,
+        data_type<$a:lifetime>: $data:ty,
+        as_data: |$self1:ident, $access1:ident| $as_data:expr,
+        expect_data: |$self2:ident, $access2:ident, $expected:tt| $expect_data:expr,
+        id: $id:expr,
+    ) => {
+        impl DataLike for $ty {
+            fn as_string<$a>(&$a self) -> Option<&$a str> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_string();
+                $as_data
+            }
+
+            fn as_text<$a>(&$a self) -> Option<&$a str> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_text();
+                $as_data
+            }
+
+            fn as_link<$a>(&$a self) -> Option<&$a str> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_link();
+                $as_data
+            }
+
+            fn as_picture<$a>(&$a self) -> Option<PictureRef<$a>> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_picture();
+                $as_data
+            }
+
+            fn as_involved_people<$a>(&$a self) -> Option<InvolvedPeopleRef<$a>> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_involved_people();
+                $as_data
+            }
+
+            fn as_object<$a>(&$a self) -> Option<ObjectRef<$a>> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_object();
+                $as_data
+            }
+
+            fn as_duration<$a>(&$a self) -> Option<Duration> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.as_duration();
+                $as_data
+            }
+
+            fn data_type<$a>(&$a self) -> Option<DataType> {
+                let $self1 = self;
+                let $access1 = |data: $data| data.data_type();
+                $as_data
+            }
+
+            fn expect_string<$a>(&$a self) -> MetadataResult<&$a str> {
+                let $self2 = self;
+                let $expected = DataType::Text;
+                let $access2 = |data: $data| {
+                    data.expect_string().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_text<$a>(&$a self) -> MetadataResult<&$a str> {
+                let $self2 = self;
+                let $expected = DataType::Text;
+                let $access2 = |data: $data| {
+                    data.expect_text().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_link<$a>(&$a self) -> MetadataResult<&$a str> {
+                let $self2 = self;
+                let $expected = DataType::Link;
+                let $access2 = |data: $data| {
+                    data.expect_link().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_picture<$a>(&$a self) -> MetadataResult<PictureRef<$a>> {
+                let $self2 = self;
+                let $expected = DataType::Picture;
+                let $access2 = |data: $data| {
+                    data.expect_picture().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_involved_people<$a>(&$a self) -> MetadataResult<InvolvedPeopleRef<$a>> {
+                let $self2 = self;
+                let $expected = DataType::InvolvedPeople;
+                let $access2 = |data: $data| {
+                    data.expect_involved_people().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_object<$a>(&$a self) -> MetadataResult<ObjectRef<$a>> {
+                let $self2 = self;
+                let $expected = DataType::Object;
+                let $access2 = |data: $data| {
+                    data.expect_object().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+
+            fn expect_duration<$a>(&$a self) -> MetadataResult<Duration> {
+                let $self2 = self;
+                let $expected = DataType::Duration;
+                let $access2 = |data: $data| {
+                    data.expect_duration().map_err(|err| match err {
+                        MetadataError::ExpectedData {
+                            expected, found, ..
+                        } => MetadataError::ExpectedData {
+                            id: ($id)(self),
+                            expected,
+                            found,
+                        },
+                        other => other,
+                    })
+                };
+                $expect_data
+            }
+        }
+    };
+}
+
+frame_impl_data_like!(
+    for: Frame,
+    data_type<'a>: &'a Data,
+    as_data: |this, access| (access)(&this.data),
+    expect_data: |this, access, _| (access)(&this.data),
+    id: |this: &Self| Some(this.id.clone()),
+);
+
+frame_impl_data_like!(
+    for: FrameRef<'_>,
+    data_type<'a>: &'a DataRef<'a>,
+    as_data: |this, access| (access)(&this.data),
+    expect_data: |this, access, _| (access)(&this.data),
+    id: |this: &Self| Some(this.id.clone()),
+);
+
+frame_impl_data_like!(
+    for: FrameCow<'_>,
+    data_type<'a>: &'a DataCow<'a>,
+    as_data: |this, access| (access)(&this.data),
+    expect_data: |this, access, _| (access)(&this.data),
+    id: |this: &Self| Some(this.id.clone()),
+);
+
 macro_rules! frame_opt {
-    (from: $from:ident, to: $to:ident, docs: $docs:tt, lt: $($lt:tt)*) => {
+    (
+        from: $from:ident,
+        to: $to:ident,
+        data: $data:ident,
+        data_opt: $data_opt:ident,
+        docs: $docs:tt,
+        lt: <$($lt:lifetime),*>,
+        lt_anon: <$($lt_anon:lifetime),*>,
+    ) => {
         #[doc = concat!($docs, " [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).\n")]
         #[doc = "\n"]
         #[doc = concat!("See [`", stringify!($from), "`], [`FrameOptLike`].")]
         #[derive(Clone, Debug)]
-        pub struct $to $($lt)* (pub Option<$from $($lt)*>);
+        pub struct $to <$($lt)*> (pub Option<$from <$($lt)*>>);
 
-        impl $($lt)* Sealed for $to $($lt)* {}
+        impl <$($lt)*> $to <$($lt)*> {
+            #[must_use]
+            pub fn from_components(id: FrameId, data: $data_opt <$($lt)*>) -> Self {
+                let Some(data) = data.into_option() else {
+                    return Self::none();
+                };
+                Self(Some($from {
+                    id,
+                    data,
+                }))
+            }
+        }
 
-        impl $($lt)* FrameOptLike for $to $($lt)* {
-            type Some = $from $($lt)*;
+        impl <$($lt)*> Sealed for $to <$($lt)*> {}
 
-            fn from_option(option: Option<$from $($lt)*>) -> Self {
+        impl <$($lt)*> FrameLike for $to <$($lt)*> {}
+
+        impl <$($lt)*> FrameOptLike for $to <$($lt)*> {
+            type Some = $from <$($lt)*>;
+
+            fn from_option(option: Option<$from <$($lt)*>>) -> Self {
                 Self(option)
             }
 
-            fn into_option(self) -> Option<$from $($lt)*> {
+            fn into_option(self) -> Option<$from <$($lt)*>> {
                 self.0
             }
 
-            fn as_option(&self) -> Option<&$from $($lt)*> {
+            fn as_option(&self) -> Option<&$from <$($lt)*>> {
                 self.0.as_ref()
             }
         }
 
-        impl $($lt)* From<Option<$from $($lt)*>> for $to $($lt)* {
-            fn from(val: Option<$from $($lt)*>) -> Self {
+        frame_impl_data_like!(
+            for: $to <$($lt_anon)*>,
+            data_type<'a>: &'a $from <$($lt_anon)*>,
+            as_data: |this, access| this.as_option().and_then(access),
+            expect_data: |this, access, expected| this.as_option().ok_or_else(|| MetadataError::ExpectedData {
+                id: this.as_option().map(|this| this.id.clone()),
+                expected,
+                found: this.as_option().and_then(|this| this.data_type()),
+            }).and_then(access),
+            id: |this: &Self| this.as_option().map(|this| this.id.clone()),
+        );
+
+        impl <$($lt)*> From<Option<$from <$($lt)*>>> for $to <$($lt)*> {
+            fn from(val: Option<$from <$($lt)*>>) -> Self {
                 Self::from_option(val)
             }
         }
 
-        impl $($lt)* From<$to $($lt)*> for Option<$from $($lt)*> {
-            fn from(val: $to $($lt)*) -> Self {
+        impl <$($lt)*> From<$to <$($lt)*>> for Option<$from <$($lt)*>> {
+            fn from(val: $to <$($lt)*>) -> Self {
                 val.into_option()
             }
         }
     };
 }
 
-frame_opt!(from: Frame, to: FrameOpt, docs: "An optional, owned", lt: <>);
-frame_opt!(from: FrameRef, to: FrameOptRef, docs: "An optional reference to", lt: <'a>);
-frame_opt!(from: FrameCow, to: FrameOptCow, docs: "An optional, owned or referenced", lt: <'a>);
+frame_opt!(
+    from: Frame,
+    to: FrameOpt,
+    data: Data,
+    data_opt: DataOpt,
+    docs: "An optional, owned",
+    lt: <>,
+    lt_anon: <>,
+);
+frame_opt!(
+    from: FrameRef,
+    to: FrameOptRef,
+    data: DataRef,
+    data_opt: DataOptRef,
+    docs: "An optional reference to",
+    lt: <'a>,
+    lt_anon: <'_>,
+);
+frame_opt!(
+    from: FrameCow,
+    to: FrameOptCow,
+    data: DataCow,
+    data_opt: DataOptCow,
+    docs: "An optional, owned or referenced",
+    lt: <'a>,
+    lt_anon: <'_>,
+);
 
 /// An owned [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
 ///
@@ -187,7 +462,9 @@ impl<'a> ToRef<'a, FrameRef<'a>> for Frame {
     }
 }
 
-impl FrameLike for Frame {
+impl FrameLike for Frame {}
+
+impl FrameSomeLike for Frame {
     fn into_owned(self) -> Frame {
         self
     }
@@ -196,7 +473,7 @@ impl FrameLike for Frame {
         &self.id
     }
 
-    fn data(&self) -> DataRef {
+    fn data(&self) -> DataRef<'_> {
         self.data.to_ref()
     }
 }
@@ -216,12 +493,14 @@ pub struct FrameRef<'a> {
 impl Sealed for FrameRef<'_> {}
 
 impl<'a> ToRef<'a, FrameRef<'a>> for FrameRef<'_> {
-    fn to_ref(&self) -> FrameRef {
+    fn to_ref(&self) -> FrameRef<'_> {
         self.clone()
     }
 }
 
-impl FrameLike for FrameRef<'_> {
+impl FrameLike for FrameRef<'_> {}
+
+impl FrameSomeLike for FrameRef<'_> {
     fn into_owned(self) -> Frame {
         Frame {
             id: self.id,
@@ -233,7 +512,7 @@ impl FrameLike for FrameRef<'_> {
         &self.id
     }
 
-    fn data(&self) -> DataRef {
+    fn data(&self) -> DataRef<'_> {
         self.data.to_ref()
     }
 }
@@ -255,7 +534,7 @@ impl<'a> ToRef<'a, FrameRef<'a>> for FrameCow<'_> {
     ///
     /// [`Owned`]: DataCow::Owned
     /// [`Ref`]: DataCow::Ref
-    fn to_ref(&self) -> FrameRef {
+    fn to_ref(&self) -> FrameRef<'_> {
         FrameRef {
             id: self.id.clone(),
             data: self.data.to_ref(),
@@ -263,7 +542,9 @@ impl<'a> ToRef<'a, FrameRef<'a>> for FrameCow<'_> {
     }
 }
 
-impl FrameLike for FrameCow<'_> {
+impl FrameLike for FrameCow<'_> {}
+
+impl FrameSomeLike for FrameCow<'_> {
     /// Unwraps [`Frame`] if the underlying data is an [`Owned`], or creates owned data by
     /// allocating if it is a [`Ref`].
     ///
@@ -280,7 +561,7 @@ impl FrameLike for FrameCow<'_> {
         &self.id
     }
 
-    fn data(&self) -> DataRef {
+    fn data(&self) -> DataRef<'_> {
         self.data.to_ref()
     }
 }
@@ -344,7 +625,7 @@ pub trait DataOptLike:
 
     /// Returns a [`DataOptRef`] pointing to this frame.
     #[must_use]
-    fn to_ref(&self) -> DataOptRef {
+    fn to_ref(&self) -> DataOptRef<'_> {
         self.as_option().map(ToRef::to_ref).into()
     }
 
@@ -362,10 +643,6 @@ pub trait DataSomeLike: Sealed + DataLike + for<'a> ToRef<'a, DataRef<'a>> {
     /// Creates an owned [`Data`] struct by allocating this data if necessary.
     #[must_use]
     fn into_owned(self) -> Data;
-
-    /// Gets the [`DataType`] of this data, or [`None`] if the data is
-    /// [`Unsupported`](Data::Unsupported).
-    fn data_type(&self) -> Option<DataType>;
 }
 
 /// A potentially optional piece of metadata associated with a [`Tag`](super::Tag).
@@ -386,19 +663,118 @@ pub trait DataLike: Sealed + Sized {
 
     /// Takes a reference to the underlying [`Data::Picture`] if this is one, or returns [`None`].
     #[must_use]
-    fn as_picture(&self) -> Option<PictureRef>;
+    fn as_picture(&self) -> Option<PictureRef<'_>>;
 
     /// Takes a reference to the underlying [`Data::InvolvedPeople`] if this is one, or returns [`None`].
     #[must_use]
-    fn as_involved_people(&self) -> Option<InvolvedPeopleRef>;
+    fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>>;
 
     /// Takes a reference to the underlying [`Data::Object`] if this is one, or returns [`None`].
     #[must_use]
-    fn as_object(&self) -> Option<ObjectRef>;
+    fn as_object(&self) -> Option<ObjectRef<'_>>;
 
     /// Copies the underlying [`Data::Duration`] if this is one, or returns [`None`].
     #[must_use]
     fn as_duration(&self) -> Option<Duration>;
+
+    /// Takes a reference to the underlying [`Data::Text`] or [`Data::Link`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_string(&self) -> MetadataResult<&str> {
+        self.as_string().ok_or_else(|| MetadataError::ExpectedData {
+            id: None,
+            expected: DataType::Text,
+            found: self.data_type(),
+        })
+    }
+
+    /// Takes a reference to the underlying [`Data::Text`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_text(&self) -> MetadataResult<&str> {
+        self.as_text().ok_or_else(|| MetadataError::ExpectedData {
+            id: None,
+            expected: DataType::Text,
+            found: self.data_type(),
+        })
+    }
+
+    /// Takes a reference to the underlying [`Data::Link`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_link(&self) -> MetadataResult<&str> {
+        self.as_link().ok_or_else(|| MetadataError::ExpectedData {
+            id: None,
+            expected: DataType::Link,
+            found: self.data_type(),
+        })
+    }
+
+    /// Takes a reference to the underlying [`Data::Picture`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_picture(&self) -> MetadataResult<PictureRef<'_>> {
+        self.as_picture()
+            .ok_or_else(|| MetadataError::ExpectedData {
+                id: None,
+                expected: DataType::Picture,
+                found: self.data_type(),
+            })
+    }
+
+    /// Takes a reference to the underlying [`Data::InvolvedPeople`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_involved_people(&self) -> MetadataResult<InvolvedPeopleRef<'_>> {
+        self.as_involved_people()
+            .ok_or_else(|| MetadataError::ExpectedData {
+                id: None,
+                expected: DataType::InvolvedPeople,
+                found: self.data_type(),
+            })
+    }
+
+    /// Takes a reference to the underlying [`Data::Object`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_object(&self) -> MetadataResult<ObjectRef<'_>> {
+        self.as_object().ok_or_else(|| MetadataError::ExpectedData {
+            id: None,
+            expected: DataType::Object,
+            found: self.data_type(),
+        })
+    }
+
+    /// Copies the underlying [`Data::Duration`] if this is one, or returns [`Err`].
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::ExpectedData`] if the correct data type was not found.
+    fn expect_duration(&self) -> MetadataResult<Duration> {
+        self.as_duration()
+            .ok_or_else(|| MetadataError::ExpectedData {
+                id: None,
+                expected: DataType::Duration,
+                found: self.data_type(),
+            })
+    }
+
+    /// Gets the [`DataType`] of this data, or [`None`] if the data is
+    /// [`Unsupported`](Data::Unsupported) or empty.
+    #[must_use]
+    fn data_type(&self) -> Option<DataType>;
 }
 
 macro_rules! data_opt {
@@ -440,20 +816,24 @@ macro_rules! data_opt {
                 self.as_option().and_then(|opt| opt.as_link())
             }
 
-            fn as_picture(&self) -> Option<PictureRef> {
+            fn as_picture(&self) -> Option<PictureRef<'_>> {
                 self.as_option().and_then(|opt| opt.as_picture())
             }
 
-            fn as_involved_people(&self) -> Option<InvolvedPeopleRef> {
+            fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>> {
                 self.as_option().and_then(|opt| opt.as_involved_people())
             }
 
-            fn as_object(&self) -> Option<ObjectRef> {
+            fn as_object(&self) -> Option<ObjectRef<'_>> {
                 self.as_option().and_then(|opt| opt.as_object())
             }
 
             fn as_duration(&self) -> Option<Duration> {
                 self.as_option().and_then(|opt| opt.as_duration())
+            }
+
+            fn data_type(&self) -> Option<DataType> {
+                self.as_option().and_then(|opt| opt.data_type())
             }
         }
 
@@ -572,18 +952,6 @@ impl DataSomeLike for Data {
     fn into_owned(self) -> Data {
         self
     }
-
-    fn data_type(&self) -> Option<DataType> {
-        match self {
-            Self::Unsupported { .. } => None,
-            Self::Text(_) => Some(DataType::Text),
-            Self::Link(_) => Some(DataType::Link),
-            Self::Picture(_) => Some(DataType::Picture),
-            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
-            Self::Object(_) => Some(DataType::Object),
-            Self::Duration(_) => Some(DataType::Duration),
-        }
-    }
 }
 
 impl DataLike for Data {
@@ -611,7 +979,7 @@ impl DataLike for Data {
         }
     }
 
-    fn as_picture(&self) -> Option<PictureRef> {
+    fn as_picture(&self) -> Option<PictureRef<'_>> {
         if let Self::Picture(v) = self {
             Some(v.to_ref())
         } else {
@@ -619,7 +987,7 @@ impl DataLike for Data {
         }
     }
 
-    fn as_involved_people(&self) -> Option<InvolvedPeopleRef> {
+    fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>> {
         if let Self::InvolvedPeople(v) = self {
             Some(v.to_ref())
         } else {
@@ -627,7 +995,7 @@ impl DataLike for Data {
         }
     }
 
-    fn as_object(&self) -> Option<ObjectRef> {
+    fn as_object(&self) -> Option<ObjectRef<'_>> {
         if let Self::Object(v) = self {
             Some(v.to_ref())
         } else {
@@ -640,6 +1008,18 @@ impl DataLike for Data {
             Some(*v)
         } else {
             None
+        }
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        match self {
+            Self::Unsupported { .. } => None,
+            Self::Text(_) => Some(DataType::Text),
+            Self::Link(_) => Some(DataType::Link),
+            Self::Picture(_) => Some(DataType::Picture),
+            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
+            Self::Object(_) => Some(DataType::Object),
+            Self::Duration(_) => Some(DataType::Duration),
         }
     }
 }
@@ -796,18 +1176,6 @@ impl DataSomeLike for DataRef<'_> {
     fn into_owned(self) -> Data {
         self.into_owned()
     }
-
-    fn data_type(&self) -> Option<DataType> {
-        match self {
-            Self::Unsupported { .. } => None,
-            Self::Text(_) => Some(DataType::Text),
-            Self::Link(_) => Some(DataType::Link),
-            Self::Picture(_) => Some(DataType::Picture),
-            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
-            Self::Object(_) => Some(DataType::Object),
-            Self::Duration(_) => Some(DataType::Duration),
-        }
-    }
 }
 
 impl DataLike for DataRef<'_> {
@@ -835,7 +1203,7 @@ impl DataLike for DataRef<'_> {
         }
     }
 
-    fn as_picture(&self) -> Option<PictureRef> {
+    fn as_picture(&self) -> Option<PictureRef<'_>> {
         if let Self::Picture(v) = self {
             Some(*v)
         } else {
@@ -843,7 +1211,7 @@ impl DataLike for DataRef<'_> {
         }
     }
 
-    fn as_involved_people(&self) -> Option<InvolvedPeopleRef> {
+    fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>> {
         if let Self::InvolvedPeople(v) = self {
             Some(v.clone())
         } else {
@@ -851,7 +1219,7 @@ impl DataLike for DataRef<'_> {
         }
     }
 
-    fn as_object(&self) -> Option<ObjectRef> {
+    fn as_object(&self) -> Option<ObjectRef<'_>> {
         if let Self::Object(v) = self {
             Some(*v)
         } else {
@@ -864,6 +1232,18 @@ impl DataLike for DataRef<'_> {
             Some(*v)
         } else {
             None
+        }
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        match self {
+            Self::Unsupported { .. } => None,
+            Self::Text(_) => Some(DataType::Text),
+            Self::Link(_) => Some(DataType::Link),
+            Self::Picture(_) => Some(DataType::Picture),
+            Self::InvolvedPeople(_) => Some(DataType::InvolvedPeople),
+            Self::Object(_) => Some(DataType::Object),
+            Self::Duration(_) => Some(DataType::Duration),
         }
     }
 }
@@ -916,10 +1296,6 @@ impl DataSomeLike for DataCow<'_> {
             Self::Ref(reference) => reference.into_owned(),
         }
     }
-
-    fn data_type(&self) -> Option<DataType> {
-        child_call!(self.child.data_type())
-    }
 }
 
 impl DataLike for DataCow<'_> {
@@ -935,20 +1311,24 @@ impl DataLike for DataCow<'_> {
         child_call!(self.child.as_link())
     }
 
-    fn as_picture(&self) -> Option<PictureRef> {
+    fn as_picture(&self) -> Option<PictureRef<'_>> {
         child_call!(self.child.as_picture())
     }
 
-    fn as_involved_people(&self) -> Option<InvolvedPeopleRef> {
+    fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>> {
         child_call!(self.child.as_involved_people())
     }
 
-    fn as_object(&self) -> Option<ObjectRef> {
+    fn as_object(&self) -> Option<ObjectRef<'_>> {
         child_call!(self.child.as_object())
     }
 
     fn as_duration(&self) -> Option<Duration> {
         child_call!(self.child.as_duration())
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        child_call!(self.child.data_type())
     }
 }
 

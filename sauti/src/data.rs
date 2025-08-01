@@ -99,6 +99,12 @@ impl MediaSource {
     pub fn copy_buf(buf: &[u8]) -> Self {
         Self::Buffer(buf.iter().copied().collect())
     }
+
+    /// Gets a description of this source suitable for error handling or display.
+    #[must_use]
+    pub fn name(&self) -> SourceName {
+        self.into()
+    }
 }
 
 impl<T: AsRef<Path>> From<T> for MediaSource {
@@ -366,7 +372,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
     /// );
     /// ```
     pub fn from_interleaved(samples: Vec<S>, spec: StreamSpec) -> Self {
-        assert!(samples.len() % spec.channels == 0, "the interleaved samples should have the same amount of samples for each channel (samples.len % channels == 0)");
+        assert!(samples.len().is_multiple_of(spec.channels), "the interleaved samples should have the same amount of samples for each channel (samples.len % channels == 0)");
         Self {
             interleaved_samples: samples,
             spec,

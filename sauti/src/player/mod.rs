@@ -721,7 +721,7 @@ impl<D: AudioDecoder, OE: OnError, OSE: OnStreamEnd> Inner<'_, D, OE, OSE> {
         }
     }
 
-    fn boxed(&mut self) -> callback::PlayerRef {
+    fn boxed(&mut self) -> callback::PlayerRef<'_> {
         Box::new(self)
     }
 

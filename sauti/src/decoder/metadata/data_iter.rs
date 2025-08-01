@@ -69,7 +69,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, &str>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
             match data {
                 DataCow::Owned(Data::Text(owned) | Data::Link(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::Text(borrow) | DataRef::Link(borrow)) => {
@@ -88,7 +88,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, &str>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
             match data {
                 DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
@@ -105,7 +105,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, &str>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
             match data {
                 DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
@@ -122,7 +122,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, PictureRef>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, PictureRef<'_>>> {
             match data {
                 DataCow::Owned(Data::Picture(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::Picture(borrow)) => Some(Boo::Borrowed(borrow)),
@@ -141,7 +141,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, InvolvedPeopleRef>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, InvolvedPeopleRef<'_>>> {
             match data {
                 DataCow::Owned(Data::InvolvedPeople(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::InvolvedPeople(borrow)) => Some(Boo::Borrowed(borrow)),
@@ -159,7 +159,7 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow) -> Option<Boo<'_, ObjectRef>> {
+        fn func(data: DataCow<'_>) -> Option<Boo<'_, ObjectRef<'_>>> {
             match data {
                 DataCow::Owned(Data::Object(owned)) => Some(Boo::Owned(owned)),
                 DataCow::Ref(DataRef::Object(borrow)) => Some(Boo::Borrowed(borrow)),
