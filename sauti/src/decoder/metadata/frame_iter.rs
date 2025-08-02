@@ -66,6 +66,17 @@ where
 /// with the language itself (see rust issue #91693). For these, you must explitictly iterate with
 /// `while let` instead.
 pub trait FrameIterExt<'d>: Iterator<Item = FrameCow<'d>> {
+    /// Returns an iterator over the [`DataCow`] object for each frame in this iterator.
+    ///
+    /// The return type of this can be thought of as
+    /// `impl Iterator<Item = DataCow<'d>>`.
+    fn data(self) -> std::iter::Map<Self, fn(FrameCow<'d>) -> DataCow<'d>>
+    where
+        Self: Sized,
+    {
+        self.map(|frame| frame.data)
+    }
+
     /// Creates an iterator over references to yielded [string](DataLike::as_string) objects.
     ///
     /// The return type of this can be thought of as

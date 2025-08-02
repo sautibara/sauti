@@ -280,7 +280,7 @@ pub trait Tag {
     /// This can be either a reference to the inner metadata (as a [`DataCow::Ref`]) or an owned
     /// object created from the inner metadata (as a [`DataCow::Owned`]).
     fn get(&self, id: FrameId) -> FrameOptCow<'_> {
-        FrameOptCow::from_option(self.get_all(id).next())
+        FrameOptCow::from_option(id.clone(), self.get_all(id).next())
     }
 
     /// Returns a iterator over all frames with a specific [`FrameId`].
@@ -601,16 +601,18 @@ impl<C: Tag, N: Tag> Tag for TagList<C, N> {
     }
 
     fn get(&self, id: FrameId) -> FrameOptCow<'_> {
-        (self
-            .current
-            .as_ref()
-            .and_then(|current| current.get(id.clone()).into_option()))
-        .or_else(|| {
-            self.next
+        FrameOptCow::from_option(
+            id.clone(),
+            (self
+                .current
                 .as_ref()
-                .and_then(|next| next.get(id).into_option())
-        })
-        .into()
+                .and_then(|current| current.get(id.clone()).into_option()))
+            .or_else(|| {
+                self.next
+                    .as_ref()
+                    .and_then(|next| next.get(id).into_option())
+            }),
+        )
     }
 
     fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {

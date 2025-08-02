@@ -426,7 +426,7 @@ impl super::super::Tag for Tag {
         let sauti_id = id.clone();
         let id = convert_sauti_to_id3_id(id);
         let Some(id) = id else {
-            return FrameOptCow::none();
+            return FrameOptCow::none(sauti_id);
         };
         let data = match id {
             Id::Text(ident) => self.get_text(ident),
@@ -452,7 +452,7 @@ impl super::super::Tag for Tag {
             Id::CustomLink(description) => self.custom_link(&description).into(),
             Id::Object(description) => self.object(&description).into(),
         };
-        FrameOptCow::from_components(sauti_id, data)
+        FrameOptCow { id: sauti_id, data }
     }
 
     fn get_all(&self, id: FrameId) -> impl Iterator<Item = FrameCow<'_>> {

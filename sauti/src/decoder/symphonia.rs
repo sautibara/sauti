@@ -394,7 +394,7 @@ impl super::metadata::Tag for Stream {
                 id,
             })
         } else {
-            None.into()
+            FrameOptCow::none(id)
         }
     }
 

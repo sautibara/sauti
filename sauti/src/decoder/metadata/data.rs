@@ -46,414 +46,29 @@ pub enum FrameId {
     Unknown(Arc<str>),
 }
 
-pub trait FrameLike: Sealed + DataLike {}
-
-/// An optional [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
+/// A generalized implementation for all [`FrameId`] - [`Data`] pairs - see [`Frame`], [`FrameRef`],
+/// [`FrameCow`], [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`].
 ///
-/// See [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`].
-pub trait FrameOptLike:
-    Sealed + FrameLike + Sized + From<Option<Self::Some>> + Into<Option<Self::Some>>
-{
-    type Some: FrameSomeLike;
-
-    /// Returns a new, empty frame.
-    fn none() -> Self {
-        Self::from_option(None)
-    }
-
-    /// Returns a new optional frame with a present value.
-    fn some(val: impl Into<Self::Some>) -> Self {
-        Self::from_option(Some(val.into()))
-    }
-
-    /// Returns a new [`FrameOptLike`] from `option`.
-    fn from_option(option: Option<Self::Some>) -> Self;
-
-    /// Convert this optional frame into an [`Option`].
-    fn into_option(self) -> Option<Self::Some>;
-
-    /// Convert this optional frame into an [`Option`]al reference.
-    fn as_option(&self) -> Option<&Self::Some>;
-
-    /// Returns `true` if the underlying option is [`None`].
-    #[must_use]
-    fn is_empty(&self) -> bool {
-        self.as_option().is_none()
-    }
-
-    /// Returns `false` if the underlying option is [`None`].
-    #[must_use]
-    fn is_some(&self) -> bool {
-        self.as_option().is_some()
-    }
-
-    /// Returns a [`FrameRef`] pointing to this frame.
-    #[must_use]
-    fn to_ref(&self) -> FrameOptRef<'_> {
-        self.as_option().map(ToRef::to_ref).into()
-    }
-
-    /// Creates an owned [`Frame`] struct by allocating this frame if necessary.
-    #[must_use]
-    fn into_owned(self) -> FrameOpt {
-        self.into_option().map(FrameSomeLike::into_owned).into()
-    }
-
-    /// Gets the key of the frame.
-    fn id(&self) -> Option<&FrameId> {
-        self.as_option().map(FrameSomeLike::id)
-    }
-
-    /// Gets the value of the frame.
-    fn data(&self) -> DataOptRef<'_> {
-        self.as_option().map(FrameSomeLike::data).into()
-    }
-}
-
-/// A [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
-///
-/// See [`Frame`], [`FrameRef`], and [`FrameCow`].
-pub trait FrameSomeLike: Sealed + FrameLike + for<'a> ToRef<'a, FrameRef<'a>> {
-    ///// Returns a [`FrameRef`] pointing to this frame.
-    //#[must_use]
-    //fn to_ref(&self) -> FrameRef;
-
-    /// Creates an owned [`Frame`] struct by allocating this frame if necessary.
-    #[must_use]
-    fn into_owned(self) -> Frame;
-
-    /// Gets the key of the frame.
-    fn id(&self) -> &FrameId;
-
-    /// Gets the value of the frame.
-    fn data(&self) -> DataRef<'_>;
-}
-
-macro_rules! frame_impl_data_like {
-    (
-        for: $ty:ty,
-        data_type<$a:lifetime>: $data:ty,
-        as_data: |$self1:ident, $access1:ident| $as_data:expr,
-        expect_data: |$self2:ident, $access2:ident, $expected:tt| $expect_data:expr,
-        id: $id:expr,
-    ) => {
-        impl DataLike for $ty {
-            fn as_string<$a>(&$a self) -> Option<&$a str> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_string();
-                $as_data
-            }
-
-            fn as_text<$a>(&$a self) -> Option<&$a str> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_text();
-                $as_data
-            }
-
-            fn as_link<$a>(&$a self) -> Option<&$a str> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_link();
-                $as_data
-            }
-
-            fn as_picture<$a>(&$a self) -> Option<PictureRef<$a>> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_picture();
-                $as_data
-            }
-
-            fn as_involved_people<$a>(&$a self) -> Option<InvolvedPeopleRef<$a>> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_involved_people();
-                $as_data
-            }
-
-            fn as_object<$a>(&$a self) -> Option<ObjectRef<$a>> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_object();
-                $as_data
-            }
-
-            fn as_duration<$a>(&$a self) -> Option<Duration> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.as_duration();
-                $as_data
-            }
-
-            fn data_type<$a>(&$a self) -> Option<DataType> {
-                let $self1 = self;
-                let $access1 = |data: $data| data.data_type();
-                $as_data
-            }
-
-            fn expect_string<$a>(&$a self) -> MetadataResult<&$a str> {
-                let $self2 = self;
-                let $expected = DataType::Text;
-                let $access2 = |data: $data| {
-                    data.expect_string().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_text<$a>(&$a self) -> MetadataResult<&$a str> {
-                let $self2 = self;
-                let $expected = DataType::Text;
-                let $access2 = |data: $data| {
-                    data.expect_text().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_link<$a>(&$a self) -> MetadataResult<&$a str> {
-                let $self2 = self;
-                let $expected = DataType::Link;
-                let $access2 = |data: $data| {
-                    data.expect_link().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_picture<$a>(&$a self) -> MetadataResult<PictureRef<$a>> {
-                let $self2 = self;
-                let $expected = DataType::Picture;
-                let $access2 = |data: $data| {
-                    data.expect_picture().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_involved_people<$a>(&$a self) -> MetadataResult<InvolvedPeopleRef<$a>> {
-                let $self2 = self;
-                let $expected = DataType::InvolvedPeople;
-                let $access2 = |data: $data| {
-                    data.expect_involved_people().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_object<$a>(&$a self) -> MetadataResult<ObjectRef<$a>> {
-                let $self2 = self;
-                let $expected = DataType::Object;
-                let $access2 = |data: $data| {
-                    data.expect_object().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-
-            fn expect_duration<$a>(&$a self) -> MetadataResult<Duration> {
-                let $self2 = self;
-                let $expected = DataType::Duration;
-                let $access2 = |data: $data| {
-                    data.expect_duration().map_err(|err| match err {
-                        MetadataError::ExpectedData {
-                            expected, found, ..
-                        } => MetadataError::ExpectedData {
-                            id: ($id)(self),
-                            expected,
-                            found,
-                        },
-                        other => other,
-                    })
-                };
-                $expect_data
-            }
-        }
-    };
-}
-
-frame_impl_data_like!(
-    for: Frame,
-    data_type<'a>: &'a Data,
-    as_data: |this, access| (access)(&this.data),
-    expect_data: |this, access, _| (access)(&this.data),
-    id: |this: &Self| Some(this.id.clone()),
-);
-
-frame_impl_data_like!(
-    for: FrameRef<'_>,
-    data_type<'a>: &'a DataRef<'a>,
-    as_data: |this, access| (access)(&this.data),
-    expect_data: |this, access, _| (access)(&this.data),
-    id: |this: &Self| Some(this.id.clone()),
-);
-
-frame_impl_data_like!(
-    for: FrameCow<'_>,
-    data_type<'a>: &'a DataCow<'a>,
-    as_data: |this, access| (access)(&this.data),
-    expect_data: |this, access, _| (access)(&this.data),
-    id: |this: &Self| Some(this.id.clone()),
-);
-
-macro_rules! frame_opt {
-    (
-        from: $from:ident,
-        to: $to:ident,
-        data: $data:ident,
-        data_opt: $data_opt:ident,
-        docs: $docs:tt,
-        lt: <$($lt:lifetime),*>,
-        lt_anon: <$($lt_anon:lifetime),*>,
-    ) => {
-        #[doc = concat!($docs, " [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).\n")]
-        #[doc = "\n"]
-        #[doc = concat!("See [`", stringify!($from), "`], [`FrameOptLike`].")]
-        #[derive(Clone, Debug)]
-        pub struct $to <$($lt)*> (pub Option<$from <$($lt)*>>);
-
-        impl <$($lt)*> $to <$($lt)*> {
-            #[must_use]
-            pub fn from_components(id: FrameId, data: $data_opt <$($lt)*>) -> Self {
-                let Some(data) = data.into_option() else {
-                    return Self::none();
-                };
-                Self(Some($from {
-                    id,
-                    data,
-                }))
-            }
-        }
-
-        impl <$($lt)*> Sealed for $to <$($lt)*> {}
-
-        impl <$($lt)*> FrameLike for $to <$($lt)*> {}
-
-        impl <$($lt)*> FrameOptLike for $to <$($lt)*> {
-            type Some = $from <$($lt)*>;
-
-            fn from_option(option: Option<$from <$($lt)*>>) -> Self {
-                Self(option)
-            }
-
-            fn into_option(self) -> Option<$from <$($lt)*>> {
-                self.0
-            }
-
-            fn as_option(&self) -> Option<&$from <$($lt)*>> {
-                self.0.as_ref()
-            }
-        }
-
-        frame_impl_data_like!(
-            for: $to <$($lt_anon)*>,
-            data_type<'a>: &'a $from <$($lt_anon)*>,
-            as_data: |this, access| this.as_option().and_then(access),
-            expect_data: |this, access, expected| this.as_option().ok_or_else(|| MetadataError::ExpectedData {
-                id: this.as_option().map(|this| this.id.clone()),
-                expected,
-                found: this.as_option().and_then(|this| this.data_type()),
-            }).and_then(access),
-            id: |this: &Self| this.as_option().map(|this| this.id.clone()),
-        );
-
-        impl <$($lt)*> From<Option<$from <$($lt)*>>> for $to <$($lt)*> {
-            fn from(val: Option<$from <$($lt)*>>) -> Self {
-                Self::from_option(val)
-            }
-        }
-
-        impl <$($lt)*> From<$to <$($lt)*>> for Option<$from <$($lt)*>> {
-            fn from(val: $to <$($lt)*>) -> Self {
-                val.into_option()
-            }
-        }
-    };
-}
-
-frame_opt!(
-    from: Frame,
-    to: FrameOpt,
-    data: Data,
-    data_opt: DataOpt,
-    docs: "An optional, owned",
-    lt: <>,
-    lt_anon: <>,
-);
-frame_opt!(
-    from: FrameRef,
-    to: FrameOptRef,
-    data: DataRef,
-    data_opt: DataOptRef,
-    docs: "An optional reference to",
-    lt: <'a>,
-    lt_anon: <'_>,
-);
-frame_opt!(
-    from: FrameCow,
-    to: FrameOptCow,
-    data: DataCow,
-    data_opt: DataOptCow,
-    docs: "An optional, owned or referenced",
-    lt: <'a>,
-    lt_anon: <'_>,
-);
-
-/// An owned [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
-///
-/// See [`FrameLike`].
-#[derive(Clone, Debug)]
-pub struct Frame {
+/// This implements [`DataLike`], so you can access the data directly.
+pub struct AnyFrame<AnyData: DataLike> {
     pub id: FrameId,
-    pub data: Data,
+    pub data: AnyData,
 }
 
-impl Sealed for Frame {}
+/// Implementations for [`Frame`], [`FrameRef`], and [`FrameCow`].
+///
+/// Not shown: [`ToRef::to_ref`], which takes `&Self` and returns [`FrameRef`].
+impl<AnyDataSome: DataSomeLike> AnyFrame<AnyDataSome> {
+    /// Obtain an owned [`Frame`] from this, potentially by cloning.
+    pub fn into_owned(self) -> Frame {
+        Frame {
+            id: self.id,
+            data: self.data.into_owned(),
+        }
+    }
+}
 
-impl<'a> ToRef<'a, FrameRef<'a>> for Frame {
+impl<'a, AnyDataSome: DataSomeLike> ToRef<'a, FrameRef<'a>> for AnyFrame<AnyDataSome> {
     fn to_ref(&'a self) -> FrameRef<'a> {
         FrameRef {
             id: self.id.clone(),
@@ -462,107 +77,226 @@ impl<'a> ToRef<'a, FrameRef<'a>> for Frame {
     }
 }
 
-impl FrameLike for Frame {}
-
-impl FrameSomeLike for Frame {
-    fn into_owned(self) -> Frame {
-        self
-    }
-
-    fn id(&self) -> &FrameId {
-        &self.id
-    }
-
-    fn data(&self) -> DataRef<'_> {
-        self.data.to_ref()
-    }
-}
-
-/// A reference to a [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
+/// Implementations for [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`]
 ///
-/// This type can be expected to be cheaply cloneable ("claimable"), using reference counting if
-/// necessary.
-///
-/// See [`FrameLike`].
-#[derive(Clone, Debug)]
-pub struct FrameRef<'a> {
-    pub id: FrameId,
-    pub data: DataRef<'a>,
-}
-
-impl Sealed for FrameRef<'_> {}
-
-impl<'a> ToRef<'a, FrameRef<'a>> for FrameRef<'_> {
-    fn to_ref(&self) -> FrameRef<'_> {
-        self.clone()
+/// Not shown: [`ToRef::to_ref`], which takes `&Self` and returns [`FrameOptRef`].
+impl<AnyDataOpt: DataOptLike> AnyFrame<AnyDataOpt> {
+    /// Create a new present optional frame from `frame`.
+    #[must_use]
+    pub fn some(frame: AnyFrame<AnyDataOpt::Some>) -> Self {
+        Self {
+            id: frame.id,
+            data: AnyDataOpt::some(frame.data),
+        }
     }
-}
 
-impl FrameLike for FrameRef<'_> {}
+    /// Create a new empty optional frame with a [`FrameId`] of `id`.
+    #[must_use]
+    pub fn none(id: FrameId) -> Self {
+        Self {
+            id,
+            data: AnyDataOpt::none(),
+        }
+    }
 
-impl FrameSomeLike for FrameRef<'_> {
-    fn into_owned(self) -> Frame {
-        Frame {
+    /// Returns `true` if this has present [data](DataLike), or `false` if this has no data.
+    #[must_use]
+    pub fn is_some(&self) -> bool {
+        self.data.is_some()
+    }
+
+    /// Returns `true` if this has no [data](DataLike), or `false` if this has present data.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.data.is_none()
+    }
+
+    /// Creates a new optional frame from an [`Option`] of the present frame type and a [`FrameId`]
+    /// for if the option is [`None`].
+    ///
+    /// See [`DataOptLike::from_option`].
+    #[must_use]
+    pub fn from_option(id: FrameId, opt: Option<AnyFrame<AnyDataOpt::Some>>) -> Self {
+        opt.map_or_else(|| Self::none(id), |frame| Self::some(frame))
+    }
+
+    /// Turn this optional frame into an [`Option`] of the present frame type.
+    ///
+    /// See [`DataOptLike::into_option`].
+    #[must_use]
+    pub fn into_option(self) -> Option<AnyFrame<AnyDataOpt::Some>> {
+        let Self { id, data } = self;
+        data.into_option().map(|data| AnyFrame { id, data })
+    }
+
+    /// Turn this into a [`FrameOpt`] by cloning if necessary.
+    #[must_use]
+    pub fn into_owned_opt(self) -> FrameOpt {
+        FrameOpt {
             id: self.id,
             data: self.data.into_owned(),
         }
     }
-
-    fn id(&self) -> &FrameId {
-        &self.id
-    }
-
-    fn data(&self) -> DataRef<'_> {
-        self.data.to_ref()
-    }
 }
 
-/// An owned or referenced [key](FrameId)-[value](DataLike) pair of metadata associated with a [`Tag`](super::Tag).
-///
-/// See [`FrameLike`].
-#[derive(Clone, Debug)]
-pub struct FrameCow<'a> {
-    pub id: FrameId,
-    pub data: DataCow<'a>,
-}
-
-impl Sealed for FrameCow<'_> {}
-
-impl<'a> ToRef<'a, FrameRef<'a>> for FrameCow<'_> {
-    /// Unwraps a [`FrameRef`] if the underlying data is a [`Ref`], or takes a reference if it is an
-    /// [`Owned`].
-    ///
-    /// [`Owned`]: DataCow::Owned
-    /// [`Ref`]: DataCow::Ref
-    fn to_ref(&self) -> FrameRef<'_> {
-        FrameRef {
+impl<'a, AnyDataOpt: DataOptLike> ToRef<'a, FrameOptRef<'a>> for AnyFrame<AnyDataOpt> {
+    fn to_ref(&'a self) -> FrameOptRef<'a> {
+        FrameOptRef {
             id: self.id.clone(),
             data: self.data.to_ref(),
         }
     }
 }
 
-impl FrameLike for FrameCow<'_> {}
+/// An owned frame; a [`FrameId`]-[`Data`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type Frame = AnyFrame<Data>;
+/// A referenced frame; a [`FrameId`]-[`DataRef`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type FrameRef<'a> = AnyFrame<DataRef<'a>>;
+/// An owned or referenced frame; a [`FrameId`]-[`DataCow`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type FrameCow<'a> = AnyFrame<DataCow<'a>>;
+/// An optional, owned frame; a [`FrameId`]-[`DataOpt`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type FrameOpt = AnyFrame<DataOpt>;
+/// An optional, referenced frame; a [`FrameId`]-[`DataOptRef`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type FrameOptRef<'a> = AnyFrame<DataOptRef<'a>>;
+/// An optional, owned or referenced frame; a [`FrameId`]-[`DataOptCow`] pair.
+///
+/// This implements [`DataLike`], so you can access the data directly.
+pub type FrameOptCow<'a> = AnyFrame<DataOptCow<'a>>;
 
-impl FrameSomeLike for FrameCow<'_> {
-    /// Unwraps [`Frame`] if the underlying data is an [`Owned`], or creates owned data by
-    /// allocating if it is a [`Ref`].
-    ///
-    /// [`Owned`]: DataCow::Owned
-    /// [`Ref`]: DataCow::Ref
-    fn into_owned(self) -> Frame {
-        Frame {
-            id: self.id,
-            data: self.data.into_owned(),
+impl<AnyData: DataLike> sealed::Sealed for AnyFrame<AnyData> {}
+
+impl<AnyData: DataLike> DataLike for AnyFrame<AnyData> {
+    fn as_string(&self) -> Option<&str> {
+        self.data.as_string()
+    }
+
+    fn as_text(&self) -> Option<&str> {
+        self.data.as_text()
+    }
+
+    fn as_link(&self) -> Option<&str> {
+        self.data.as_link()
+    }
+
+    fn as_picture(&self) -> Option<PictureRef<'_>> {
+        self.data.as_picture()
+    }
+
+    fn as_involved_people(&self) -> Option<InvolvedPeopleRef<'_>> {
+        self.data.as_involved_people()
+    }
+
+    fn as_object(&self) -> Option<ObjectRef<'_>> {
+        self.data.as_object()
+    }
+
+    fn as_duration(&self) -> Option<Duration> {
+        self.data.as_duration()
+    }
+
+    fn expect_string(&self) -> MetadataResult<&str> {
+        match self.data.expect_string() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
         }
     }
 
-    fn id(&self) -> &FrameId {
-        &self.id
+    fn expect_text(&self) -> MetadataResult<&str> {
+        match self.data.expect_text() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
     }
 
-    fn data(&self) -> DataRef<'_> {
-        self.data.to_ref()
+    fn expect_link(&self) -> MetadataResult<&str> {
+        match self.data.expect_link() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
+    }
+
+    fn expect_picture(&self) -> MetadataResult<PictureRef<'_>> {
+        match self.data.expect_picture() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
+    }
+
+    fn expect_involved_people(&self) -> MetadataResult<InvolvedPeopleRef<'_>> {
+        match self.data.expect_involved_people() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
+    }
+
+    fn expect_object(&self) -> MetadataResult<ObjectRef<'_>> {
+        match self.data.expect_object() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
+    }
+
+    fn expect_duration(&self) -> MetadataResult<Duration> {
+        match self.data.expect_duration() {
+            Err(MetadataError::ExpectedData {
+                expected, found, ..
+            }) => Err(MetadataError::ExpectedData {
+                id: Some(self.id.clone()),
+                expected,
+                found,
+            }),
+            other => other,
+        }
+    }
+
+    fn data_type(&self) -> Option<DataType> {
+        self.data.data_type()
     }
 }
 
@@ -580,6 +314,24 @@ impl<'a> From<FrameRef<'a>> for FrameCow<'a> {
         Self {
             id: value.id,
             data: DataCow::Ref(value.data),
+        }
+    }
+}
+
+impl From<FrameOpt> for FrameOptCow<'_> {
+    fn from(value: FrameOpt) -> Self {
+        Self {
+            id: value.id,
+            data: DataOptCow::from(value.data),
+        }
+    }
+}
+
+impl<'a> From<FrameOptRef<'a>> for FrameOptCow<'a> {
+    fn from(value: FrameOptRef<'a>) -> Self {
+        Self {
+            id: value.id,
+            data: DataOptCow::from(value.data),
         }
     }
 }
@@ -613,7 +365,7 @@ pub trait DataOptLike:
 
     /// Returns `true` if the underlying option is [`None`].
     #[must_use]
-    fn is_empty(&self) -> bool {
+    fn is_none(&self) -> bool {
         self.as_option().is_none()
     }
 
@@ -870,6 +622,20 @@ impl From<Data> for DataOptCow<'_> {
 impl<'a> From<DataRef<'a>> for DataOptCow<'a> {
     fn from(value: DataRef<'a>) -> Self {
         Self::from(DataCow::Ref(value))
+    }
+}
+
+impl From<DataOpt> for DataOptCow<'_> {
+    fn from(value: DataOpt) -> Self {
+        let opt = value.into_option().map(Into::into);
+        Self::from_option(opt)
+    }
+}
+
+impl<'a> From<DataOptRef<'a>> for DataOptCow<'a> {
+    fn from(value: DataOptRef<'a>) -> Self {
+        let opt = value.into_option().map(Into::into);
+        Self::from_option(opt)
     }
 }
 

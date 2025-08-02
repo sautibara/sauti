@@ -1,6 +1,7 @@
 use std::{error::Error, path::PathBuf};
 
 use gat_lending_iterator::LendingIterator;
+use sauti::decoder::metadata::frame_iter::FrameIterExt;
 use sauti::decoder::metadata::prelude::*;
 use sauti::decoder::metadata::{DynDecoder, FrameId};
 
@@ -29,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let album = album.as_string().unwrap_or("<unknown>");
 
     let iter = metadata.get_all(FrameId::Artist);
-    let artists = separate_strings(iter, " & ");
+    let artists = separate_strings(iter.data(), " & ");
 
     println!("Track: '{title}' by '{artists}' in '{album}'");
 
