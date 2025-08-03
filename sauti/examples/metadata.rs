@@ -11,7 +11,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let Some(path) = std::env::args().nth(1) else {
         println!(
             "usage: {} {{path}}",
-            std::env::args().nth(0).unwrap_or("{command}".to_owned())
+            std::env::args()
+                .next()
+                .unwrap_or_else(|| "{command}".to_owned())
         );
         return Ok(());
     };
@@ -22,7 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let decoder = Box::new(decoder) as Box<dyn DynDecoder>;
 
     let source = sauti::data::MediaSource::Path(PathBuf::from(&path));
-    let metadata = decoder.read(&source)?;
+    let mut metadata = decoder.read(&source)?;
 
     let title = metadata.get(FrameId::Title);
     let title = title.as_string().unwrap_or("<unknown>");
@@ -40,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "Duration: {}:{}",
             duration.as_secs() / 60,
             duration.as_secs() % 60
-        )
+        );
     }
 
     println!();

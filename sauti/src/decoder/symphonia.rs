@@ -459,7 +459,7 @@ impl From<GenericError> for super::metadata::MetadataError {
                 source,
                 unsupported_reason,
             } => match error {
-                SymphoniaError::IoError(error) => Self::IoError(error),
+                SymphoniaError::IoError(error) => Self::Io(error),
                 SymphoniaError::DecodeError(reason) => Self::MalformedData {
                     source,
                     reason: Some(reason.to_string()),
@@ -484,7 +484,7 @@ impl From<GenericError> for super::metadata::MetadataError {
                 source,
                 reason: Some("source has no tracks".to_string()),
             },
-            GenericError::IoError(error) => Self::IoError(error),
+            GenericError::IoError(error) => Self::Io(error),
         }
     }
 }

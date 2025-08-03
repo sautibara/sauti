@@ -9,7 +9,7 @@ use super::super::prelude::*;
 fn map_err(err: metaflac::Error, source: SourceName) -> MetadataError {
     let metaflac::Error { kind, description } = err;
     match kind {
-        metaflac::ErrorKind::Io(io_err) => metadata::MetadataError::IoError(io_err),
+        metaflac::ErrorKind::Io(io_err) => metadata::MetadataError::Io(io_err),
         metaflac::ErrorKind::StringDecoding(from_utf8_err) => {
             metadata::MetadataError::MalformedData {
                 source,
@@ -81,6 +81,19 @@ impl Tag {
 impl metadata::Tag for Tag {
     fn frames(&self) -> impl Iterator<Item = FrameCow<'_>> {
         self.blocks().flat_map(WrapBlock::frames)
+    }
+
+    #[inline]
+    fn supports(&self, query: metadata::Operation) -> bool {
+        match query {
+            metadata::Operation::Get(id)
+            | metadata::Operation::GetAll(id)
+            | metadata::Operation::Replace(id)
+            | metadata::Operation::Add(id)
+            | metadata::Operation::Remove(id) => Self::supports_id(&id),
+            metadata::Operation::Data(data_type) => Self::supports_data(data_type),
+            metadata::Operation::Frames | metadata::Operation::Save => true,
+        }
     }
 
     fn remove(&mut self, id: FrameId) -> MetadataResult<()> {
@@ -175,18 +188,6 @@ impl metadata::Tag for Tag {
             .clone() // for some odd reason write_to_path requires a mutable reference, so we clone
             .write_to_path(path)
             .map_err(|err| map_err(err, self.source_name.clone()))
-    }
-
-    fn supports(&self, query: metadata::Operation) -> bool {
-        match query {
-            metadata::Operation::Get(id)
-            | metadata::Operation::GetAll(id)
-            | metadata::Operation::Replace(id)
-            | metadata::Operation::Add(id)
-            | metadata::Operation::Remove(id) => Self::supports_id(&id),
-            metadata::Operation::Data(data_type) => Self::supports_data(data_type),
-            metadata::Operation::Frames | metadata::Operation::Save => true,
-        }
     }
 }
 
@@ -284,7 +285,7 @@ impl<'a> WrapSautiId<'a> {
             FrameId::AlbumArtist => Some(Self::Text(WrapId {
                 id: ALBUMARTIST_BYTES,
             })),
-            FrameId::Unknown(string) => Some(Self::Text(WrapId { id: string })),
+            FrameId::Unknown(string) => Some(Self::Text(WrapId { id: &string.0 })),
             FrameId::CustomText(string) | FrameId::CustomLink(string) => Some(Self::Text(WrapId {
                 id: string.as_bytes(),
             })),
@@ -309,7 +310,7 @@ impl<'a> WrapId<'a> {
             ALBUM_BYTES => FrameId::Album,
             ARTIST_BYTES => FrameId::Artist,
             ALBUMARTIST_BYTES => FrameId::AlbumArtist,
-            other_str => FrameId::Unknown(Arc::from(other_str)),
+            other_str => FrameId::Unknown(From::from(other_str)),
         }
     }
 

@@ -1,6 +1,6 @@
 //! Utilities for decoding the metadata of audio files.
 
-use std::path::Path;
+use std::{path::Path, str::Utf8Error};
 
 use prelude::*;
 use thiserror::Error;
@@ -37,8 +37,8 @@ pub mod data_iter;
 pub mod frame_iter;
 
 type DefaultTy = List<
-    implementations::id3::Decoder,
-    List<implementations::flac::Decoder, super::symphonia::Symphonia>,
+    List<implementations::id3::Decoder, implementations::flac::Decoder>,
+    List<implementations::m4a::Decoder, super::symphonia::Symphonia>,
 >;
 
 /// A wrapper around the default [`Decoder`], see [`default`].
@@ -109,11 +109,13 @@ impl Tag for DefaultTag {
 /// - [durations](FrameId::Duration) through [`symphonia`]
 #[must_use]
 pub fn default() -> self::Default {
-    // self::Default(implementations::id3::Decoder::new())
     self::Default(List::new(
-        implementations::id3::Decoder::new(),
         List::new(
+            implementations::id3::Decoder::new(),
             implementations::flac::Decoder::new(),
+        ),
+        List::new(
+            implementations::m4a::Decoder::new(),
             super::symphonia::Symphonia::default(),
         ),
     ))
@@ -830,8 +832,10 @@ pub enum MetadataError {
         expected: DataType,
         found: Option<DataType>,
     },
+    #[error("expected valid utf8 for FrameId::Unknown, found {}", String::from_utf8_lossy(&unknown.0))]
+    UnknownInvalidUtf8 { err: Utf8Error, unknown: UnknownId },
     #[error("io error: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("{:?}\n{:?}", .0, .1)]
     List(Box<Self>, Box<Self>),
     #[error("decoder found error: {}", .0.as_deref().unwrap_or("unknown"))]

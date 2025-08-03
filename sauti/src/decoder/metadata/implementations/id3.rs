@@ -65,26 +65,8 @@ fn convert_sauti_to_id3_id(id: FrameId) -> Option<Id> {
         FrameId::CustomObject(string) => Some(Id::Object(string)),
         FrameId::CustomText(string) => Some(Id::CustomText(string)),
         FrameId::CustomLink(string) => Some(Id::CustomLink(string)),
-        FrameId::Unknown(id) => Some(Id::Unknown(UnknownId { id })),
+        FrameId::Unknown(id) => Some(Id::Unknown(id)),
         FrameId::Duration => None,
-    }
-}
-
-struct UnknownId {
-    id: Arc<[u8]>,
-}
-
-impl UnknownId {
-    fn as_utf8(&self) -> MetadataResult<&str> {
-        str::from_utf8(&self.id).map_err(|err| {
-            MetadataError::Other(Some(format!(
-                "expected valid utf8 for FrameId::Unknown: {err}"
-            )))
-        })
-    }
-
-    fn into_utf8(self) -> Option<String> {
-        String::from_utf8(self.id.to_vec()).ok()
     }
 }
 
@@ -483,14 +465,13 @@ impl super::super::Tag for Tag {
                 let iter = self.get_text_all(id);
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
-            Some(Id::Unknown(id)) => {
-                if let Some(id) = id.into_utf8() {
+            Some(Id::Unknown(id)) => id.into_utf8().map_or_else(
+                |_| Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>,
+                |id| {
                     let iter = self.get_text_all(id);
                     Box::new(iter) as Box<dyn Iterator<Item = _>>
-                } else {
-                    Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
-                }
-            }
+                },
+            ),
             Some(Id::Picture(picture_type)) => {
                 let iter = self.pictures(picture_type);
                 Box::new(iter) as Box<dyn Iterator<Item = _>>

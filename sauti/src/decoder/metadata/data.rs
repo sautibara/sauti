@@ -1,6 +1,6 @@
 //! Different types of metadata that can be decoded from an audio file.
 
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{fmt::Debug, str::Utf8Error, sync::Arc, time::Duration};
 
 use gat_borrow::{IntoOwnedImpl, Reborrow, ToRef};
 
@@ -43,7 +43,73 @@ pub enum FrameId {
     CustomLink(Arc<str>),
     /// An unknown id, specific to the background implementation. For example, this will likely be
     /// four letters for an id3 id (arbitrary datatype).
-    Unknown(Arc<[u8]>),
+    Unknown(UnknownId),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct UnknownId(pub Arc<[u8]>);
+
+impl UnknownId {
+    fn error(&self, err: Utf8Error) -> MetadataError {
+        MetadataError::UnknownInvalidUtf8 {
+            err,
+            unknown: self.clone(),
+        }
+    }
+
+    /// Attempts to convert the byte slice into utf8, returning [`Ok`] if the conversion succeeded.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::UnknownInvalidUtf8`] - If the byte slice is not valid utf8.
+    pub fn as_utf8(&self) -> MetadataResult<&str> {
+        str::from_utf8(&self.0).map_err(|err| self.error(err))
+    }
+
+    /// Attempts to convert the byte slice into an owned utf8 [`String`], returning [`Ok`] if the
+    /// conversion succeeded.
+    ///
+    /// # Errors
+    ///
+    /// - [`MetadataError::UnknownInvalidUtf8`] - If the byte slice is not valid utf8.
+    pub fn into_utf8(self) -> MetadataResult<String> {
+        String::from_utf8(self.0.to_vec())
+            .map_err(|err| err.utf8_error())
+            .map_err(|err| self.error(err))
+    }
+}
+
+impl From<Arc<[u8]>> for UnknownId {
+    fn from(value: Arc<[u8]>) -> Self {
+        Self(value)
+    }
+}
+
+impl<'a> From<&'a [u8]> for UnknownId {
+    fn from(value: &'a [u8]) -> Self {
+        Self(value.into())
+    }
+}
+
+impl FromIterator<u8> for UnknownId {
+    fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
+        Self(Arc::from_iter(iter))
+    }
+}
+
+// Taken from crate `byte_string`
+impl Debug for UnknownId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "b\"")?;
+
+        for byte in self.0.iter() {
+            for ch in std::ascii::escape_default(*byte) {
+                write!(f, "{}", ch as char)?;
+            }
+        }
+
+        write!(f, "\"")
+    }
 }
 
 /// A generalized implementation for all [`FrameId`] - [`Data`] pairs - see [`Frame`], [`FrameRef`],
