@@ -89,7 +89,7 @@ impl metadata::Tag for Tag {
         };
         match id {
             WrapSautiId::Text(text) => {
-                let text = text.id;
+                let text = text.as_utf8()?;
                 self.tag.vorbis_comments_mut().comments.remove(text);
             }
             WrapSautiId::Picture(picture_type) => {
@@ -127,7 +127,7 @@ impl metadata::Tag for Tag {
         let res = match wrap_id {
             WrapSautiId::Text(text) => {
                 if let Data::Text(string) | Data::Link(string) = data {
-                    let id = text.id;
+                    let id = text.as_utf8()?;
                     self.tag
                         .vorbis_comments_mut()
                         .comments
@@ -233,7 +233,7 @@ impl<'a> WrapComments<'a> {
             .comments
             .iter()
             .map(|(id, values)| WrapComment {
-                id: WrapId { id },
+                id: WrapId { id: id.as_bytes() },
                 values,
             })
     }
@@ -264,6 +264,11 @@ impl<'a> WrapComment<'a> {
     }
 }
 
+const TITLE_BYTES: &[u8] = b"TITLE";
+const ALBUM_BYTES: &[u8] = b"ALBUM";
+const ARTIST_BYTES: &[u8] = b"ARTIST";
+const ALBUMARTIST_BYTES: &[u8] = b"ALBUMARTIST";
+
 enum WrapSautiId<'a> {
     Text(WrapId<'a>),
     Picture(WrapPictureType),
@@ -273,13 +278,16 @@ enum WrapSautiId<'a> {
 impl<'a> WrapSautiId<'a> {
     fn new(id: &'a FrameId) -> Option<Self> {
         match id {
-            FrameId::Title => Some(Self::Text(WrapId { id: "TITLE" })),
-            FrameId::Album => Some(Self::Text(WrapId { id: "ALBUM" })),
-            FrameId::Artist => Some(Self::Text(WrapId { id: "ARTIST" })),
-            FrameId::AlbumArtist => Some(Self::Text(WrapId { id: "ALBUMARTIST" })),
-            FrameId::Unknown(string)
-            | FrameId::CustomText(string)
-            | FrameId::CustomLink(string) => Some(Self::Text(WrapId { id: string })),
+            FrameId::Title => Some(Self::Text(WrapId { id: TITLE_BYTES })),
+            FrameId::Album => Some(Self::Text(WrapId { id: ALBUM_BYTES })),
+            FrameId::Artist => Some(Self::Text(WrapId { id: ARTIST_BYTES })),
+            FrameId::AlbumArtist => Some(Self::Text(WrapId {
+                id: ALBUMARTIST_BYTES,
+            })),
+            FrameId::Unknown(string) => Some(Self::Text(WrapId { id: string })),
+            FrameId::CustomText(string) | FrameId::CustomLink(string) => Some(Self::Text(WrapId {
+                id: string.as_bytes(),
+            })),
             FrameId::Picture(picture_type) => {
                 Some(Self::Picture(WrapPictureType::from_sauti(*picture_type)))
             }
@@ -291,18 +299,26 @@ impl<'a> WrapSautiId<'a> {
 
 #[derive(Clone, Copy)]
 struct WrapId<'a> {
-    id: &'a str,
+    id: &'a [u8],
 }
 
-impl WrapId<'_> {
+impl<'a> WrapId<'a> {
     fn id(self) -> FrameId {
         match self.id {
-            "TITLE" => FrameId::Title,
-            "ALBUM" => FrameId::Album,
-            "ARTIST" => FrameId::Artist,
-            "ALBUMARTIST" => FrameId::AlbumArtist,
+            TITLE_BYTES => FrameId::Title,
+            ALBUM_BYTES => FrameId::Album,
+            ARTIST_BYTES => FrameId::Artist,
+            ALBUMARTIST_BYTES => FrameId::AlbumArtist,
             other_str => FrameId::Unknown(Arc::from(other_str)),
         }
+    }
+
+    fn as_utf8(self) -> MetadataResult<&'a str> {
+        str::from_utf8(self.id).map_err(|err| {
+            MetadataError::Other(Some(format!(
+                "expected valid utf8 for FrameId::Unknown: {err}"
+            )))
+        })
     }
 }
 

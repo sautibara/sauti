@@ -49,7 +49,7 @@ enum Id {
     Object(Arc<str>),
     CustomText(Arc<str>),
     CustomLink(Arc<str>),
-    Unknown(Arc<str>),
+    Unknown(UnknownId),
 }
 
 fn convert_sauti_to_id3_id(id: FrameId) -> Option<Id> {
@@ -65,8 +65,26 @@ fn convert_sauti_to_id3_id(id: FrameId) -> Option<Id> {
         FrameId::CustomObject(string) => Some(Id::Object(string)),
         FrameId::CustomText(string) => Some(Id::CustomText(string)),
         FrameId::CustomLink(string) => Some(Id::CustomLink(string)),
-        FrameId::Unknown(string) => Some(Id::Unknown(string)),
+        FrameId::Unknown(id) => Some(Id::Unknown(UnknownId { id })),
         FrameId::Duration => None,
+    }
+}
+
+struct UnknownId {
+    id: Arc<[u8]>,
+}
+
+impl UnknownId {
+    fn as_utf8(&self) -> MetadataResult<&str> {
+        str::from_utf8(&self.id).map_err(|err| {
+            MetadataError::Other(Some(format!(
+                "expected valid utf8 for FrameId::Unknown: {err}"
+            )))
+        })
+    }
+
+    fn into_utf8(self) -> Option<String> {
+        String::from_utf8(self.id.to_vec()).ok()
     }
 }
 
@@ -185,7 +203,7 @@ fn convert_id3_to_sauti_frame_all(frame: &id3::frame::Frame) -> impl Iterator<It
         (_, id3::Content::ExtendedLink(id3::frame::ExtendedLink { description, .. })) => {
             FrameId::CustomLink(description.clone().into())
         }
-        (other, _) => FrameId::Unknown(other.to_owned().into()),
+        (other, _) => FrameId::Unknown(other.bytes().collect()),
     };
 
     let data = convert_id3_to_sauti_data_all(frame.content());
@@ -430,7 +448,9 @@ impl super::super::Tag for Tag {
         };
         let data = match id {
             Id::Text(ident) => self.get_text(ident),
-            Id::Unknown(ident) => self.get_text(&ident),
+            Id::Unknown(ident) => DataOptCow::from_option(
+                (ident.as_utf8().ok()).and_then(|ident| self.get_text(ident).into_option()),
+            ),
             Id::Picture(picture_type) => {
                 let mut iter = self.pictures(picture_type);
                 DataOptCow::from_option(iter.next())
@@ -464,8 +484,12 @@ impl super::super::Tag for Tag {
                 Box::new(iter) as Box<dyn Iterator<Item = _>>
             }
             Some(Id::Unknown(id)) => {
-                let iter = self.get_text_all(id);
-                Box::new(iter) as Box<dyn Iterator<Item = _>>
+                if let Some(id) = id.into_utf8() {
+                    let iter = self.get_text_all(id);
+                    Box::new(iter) as Box<dyn Iterator<Item = _>>
+                } else {
+                    Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
+                }
             }
             Some(Id::Picture(picture_type)) => {
                 let iter = self.pictures(picture_type);
@@ -541,6 +565,7 @@ impl super::super::Tag for Tag {
                 Ok(())
             }
             (Id::Unknown(id), Ok(content)) => {
+                let id = id.as_utf8()?;
                 self.tag.add_frame(id3::Frame::with_content(id, content));
                 Ok(())
             }
@@ -648,6 +673,7 @@ impl super::super::Tag for Tag {
                     .remove_encapsulated_object(Some(&description), None, None, None);
             }
             Id::Unknown(id) => {
+                let id = id.as_utf8()?;
                 self.tag.remove(id);
             }
         }

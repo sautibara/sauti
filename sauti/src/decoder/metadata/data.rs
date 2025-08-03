@@ -43,7 +43,7 @@ pub enum FrameId {
     CustomLink(Arc<str>),
     /// An unknown id, specific to the background implementation. For example, this will likely be
     /// four letters for an id3 id (arbitrary datatype).
-    Unknown(Arc<str>),
+    Unknown(Arc<[u8]>),
 }
 
 /// A generalized implementation for all [`FrameId`] - [`Data`] pairs - see [`Frame`], [`FrameRef`],

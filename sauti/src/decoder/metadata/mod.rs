@@ -23,9 +23,11 @@ pub mod prelude {
 }
 
 pub mod implementations {
-    pub mod id3;
-    pub use crate::decoder::symphonia;
     pub mod flac;
+    pub mod id3;
+    pub mod m4a;
+
+    pub use crate::decoder::symphonia;
 }
 
 pub mod data;
