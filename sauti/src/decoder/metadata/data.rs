@@ -50,6 +50,7 @@ pub enum FrameId {
 /// [`FrameCow`], [`FrameOpt`], [`FrameOptRef`], and [`FrameOptCow`].
 ///
 /// This implements [`DataLike`], so you can access the data directly.
+#[derive(Debug, Clone)]
 pub struct AnyFrame<AnyData: DataLike> {
     pub id: FrameId,
     pub data: AnyData,
@@ -135,6 +136,16 @@ impl<AnyDataOpt: DataOptLike> AnyFrame<AnyDataOpt> {
         FrameOpt {
             id: self.id,
             data: self.data.into_owned(),
+        }
+    }
+
+    /// Returns `self` if [`Self::is_some`]. Otherwise, returns the output of `func`.
+    #[must_use]
+    pub fn or_else(self, func: impl FnOnce() -> Self) -> Self {
+        if self.is_some() {
+            self
+        } else {
+            (func)()
         }
     }
 }
@@ -385,6 +396,16 @@ pub trait DataOptLike:
     #[must_use]
     fn into_owned(self) -> DataOpt {
         self.into_option().map(DataSomeLike::into_owned).into()
+    }
+
+    /// Returns `self` if [`Self::is_some`]. Otherwise, calls `func` and returns its value.
+    #[must_use]
+    fn or_else(self, func: impl FnOnce() -> Self) -> Self {
+        if self.is_some() {
+            self
+        } else {
+            (func)()
+        }
     }
 }
 

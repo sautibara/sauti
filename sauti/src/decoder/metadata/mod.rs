@@ -25,6 +25,7 @@ pub mod prelude {
 pub mod implementations {
     pub mod id3;
     pub use crate::decoder::symphonia;
+    pub mod flac;
 }
 
 pub mod data;
@@ -33,13 +34,16 @@ pub use data::{Data, DataCow, DataRef, Frame, FrameCow, FrameId, FrameRef};
 pub mod data_iter;
 pub mod frame_iter;
 
+type DefaultTy = List<
+    implementations::id3::Decoder,
+    List<implementations::flac::Decoder, super::symphonia::Symphonia>,
+>;
+
 /// A wrapper around the default [`Decoder`], see [`default`].
-pub struct Default(List<implementations::id3::Decoder, super::symphonia::Symphonia>);
-// pub struct Default(implementations::id3::Decoder);
+pub struct Default(DefaultTy);
 
 /// A wrapper around the default [`Tag`], see [`default`].
-pub struct DefaultTag(TagList<implementations::id3::Tag, super::symphonia::Stream>);
-// pub struct DefaultTag(implementations::id3::Tag);
+pub struct DefaultTag(<DefaultTy as Decoder>::Tag);
 
 impl Decoder for Default {
     type Tag = DefaultTag;
@@ -96,12 +100,20 @@ impl Tag for DefaultTag {
 }
 
 /// Get the default [`Decoder`]
+///
+/// Currently supported:
+/// - `id3` through [`id3`],
+/// - `flac` through [`metaflac`],
+/// - [durations](FrameId::Duration) through [`symphonia`]
 #[must_use]
 pub fn default() -> self::Default {
     // self::Default(implementations::id3::Decoder::new())
     self::Default(List::new(
         implementations::id3::Decoder::new(),
-        super::symphonia::Symphonia::default(),
+        List::new(
+            implementations::flac::Decoder::new(),
+            super::symphonia::Symphonia::default(),
+        ),
     ))
 }
 
