@@ -29,9 +29,12 @@ symphonia = { version = "0.5.3", features = [
   "opt-simd",
 ], optional = true }
 # metadata decoding
-metaflac = "0.2.8"
-id3 = "1.16.2"
-mp4ameta = "0.12.1"
+metaflac = { version = "0.2.8", optional = true }
+id3 = { version = "1.16.2", optional = true }
+mp4ameta = { version = "0.12.1", optional = true }
+oggvorbismeta = { version = "0.2.0", optional = true }
+ogg = { version = "0.7.0", optional = true }
+base64 = { version = "0.22.1", optional = true }
 
 [dev-dependencies]
 env_logger = "0.11.1"
@@ -45,7 +48,17 @@ default = ["player", "metadata-decoder"]
 player = ["audio-decoder", "effect", "output"]
 decoder = ["dep:symphonia"]
 audio-decoder = ["decoder"]
-metadata-decoder = ["decoder", "dep:gat-lending-iterator", "dep:gat-borrow"]
+metadata-decoder = [
+  "decoder",
+  "dep:gat-lending-iterator",
+  "dep:gat-borrow",
+  "dep:metaflac",
+  "dep:id3",
+  "dep:mp4ameta",
+  "dep:oggvorbismeta",
+  "dep:ogg",
+  "dep:base64",
+]
 effect = ["dep:rubato"]
 output = [] # cpal cannot be optional, as it's required for data
 test = []

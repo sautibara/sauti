@@ -51,6 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{frame:?}");
     }
 
+    metadata.replace(FrameId::Title, Data::Text("meow".to_string()))?;
+    metadata.save(path)?;
+
     Ok(())
 }
 

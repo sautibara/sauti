@@ -26,6 +26,7 @@ pub mod implementations {
     pub mod flac;
     pub mod id3;
     pub mod m4a;
+    pub mod ogg;
 
     pub use crate::decoder::symphonia;
 }
@@ -38,7 +39,10 @@ pub mod frame_iter;
 
 type DefaultTy = List<
     List<implementations::id3::Decoder, implementations::flac::Decoder>,
-    List<implementations::m4a::Decoder, super::symphonia::Symphonia>,
+    List<
+        implementations::m4a::Decoder,
+        List<implementations::ogg::Decoder, super::symphonia::Symphonia>,
+    >,
 >;
 
 /// A wrapper around the default [`Decoder`], see [`default`].
@@ -116,7 +120,10 @@ pub fn default() -> self::Default {
         ),
         List::new(
             implementations::m4a::Decoder::new(),
-            super::symphonia::Symphonia::default(),
+            List::new(
+                implementations::ogg::Decoder::new(),
+                super::symphonia::Symphonia::default(),
+            ),
         ),
     ))
 }
@@ -834,6 +841,8 @@ pub enum MetadataError {
     },
     #[error("expected valid utf8 for FrameId::Unknown, found {}", String::from_utf8_lossy(&unknown.0))]
     UnknownInvalidUtf8 { err: Utf8Error, unknown: UnknownId },
+    #[error("expected Data that is not Unsupported, found: {found:?}")]
+    AddUnsupported { id: FrameId, found: Data },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("{:?}\n{:?}", .0, .1)]
