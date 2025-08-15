@@ -188,6 +188,7 @@ impl<'a> WrapComment<'a> {
                     reason: Some(format!("failed to decode base64 picture: {err}")),
                 },
                 |data| {
+                    // TODO: allow getting this information through `image`
                     Data::Picture(Picture {
                         mime_type: "application/octet-stream".to_owned(),
                         description: String::new(),

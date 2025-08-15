@@ -64,21 +64,7 @@ impl Tag {
         self.tag.data().map(WrapFrame::from_tuple)
     }
 
-    const fn supports_id_imm(id: &FrameId) -> bool {
-        matches!(
-            id,
-            FrameId::Title
-                | FrameId::Album
-                | FrameId::Artist
-                | FrameId::AlbumArtist
-                | FrameId::Picture(PictureType::CoverFront)
-                | FrameId::CustomText(_)
-                | FrameId::CustomLink(_)
-                | FrameId::CustomObject(_)
-        )
-    }
-
-    const fn supports_id_mut(id: &FrameId) -> bool {
+    const fn supports_id(id: &FrameId) -> bool {
         matches!(
             id,
             FrameId::Title
@@ -108,10 +94,11 @@ impl metadata::Tag for Tag {
     #[inline]
     fn supports(&self, query: Operation) -> bool {
         match query {
-            Operation::Get(id) | Operation::GetAll(id) => Self::supports_id_imm(&id),
-            Operation::Replace(id) | Operation::Add(id) | Operation::Remove(id) => {
-                Self::supports_id_mut(&id)
-            }
+            Operation::Get(id)
+            | Operation::GetAll(id)
+            | Operation::Replace(id)
+            | Operation::Add(id)
+            | Operation::Remove(id) => Self::supports_id(&id),
             Operation::Data(data_type) => Self::supports_data(data_type),
             Operation::Frames | Operation::Save => true,
         }
