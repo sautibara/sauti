@@ -37,7 +37,6 @@ ogg = { version = "0.7.0", optional = true }
 base64 = { version = "0.22.1", optional = true }
 
 [dev-dependencies]
-env_logger = "0.11.1"
 regex = "1.10.3"
 # this is a hack to ensure that these features are enabled in doc-tests
 sauti = { path = ".", features = ["player", "test"] }
