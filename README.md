@@ -27,7 +27,7 @@ pub fn main() -> Result<(), sauti::player::Disconnected> {
     };
 
     // create and start the audio player in another thread
-    let handle = Player::builder().volumehttps://github.com/sautibara/sauti/blob/main/LICENSE(0.5).run();
+    let handle = Player::builder().volume(0.5).run();
     // begin playing the file by the path that was given
     handle.play(path)?;
 
@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     };
 
-    // Create a metadata decoder using the default decoders.
+    // Create a metadata decoder using the defaults.
     let decoder = sauti::decoder::metadata::default();
 
     // Read the path into an opaque metadata struct.
@@ -67,11 +67,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let title = title.as_string().unwrap_or("<unknown>");
     let album = metadata.get(FrameId::Album);
     let album = album.as_string().unwrap_or("<unknown>");
-    let album = metadata.get(FrameId::Artist);
-    let album = album.as_string().unwrap_or("<unknown>");
+    let artist = metadata.get(FrameId::Artist);
+    let artist = album.as_string().unwrap_or("<unknown>");
 
     // Then print out the components.
-    println!("Track: '{title}' by '{artists}' in '{album}'");
+    println!("Track: '{title}' by '{artist}' in '{album}'");
 
     Ok(())
 }
