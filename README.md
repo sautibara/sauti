@@ -14,6 +14,8 @@ By default:
 
 # Example
 
+## Audio Player
+
 ```rust
 use sauti::player::prelude::*;
 
@@ -25,7 +27,7 @@ pub fn main() -> Result<(), sauti::player::Disconnected> {
     };
 
     // create and start the audio player in another thread
-    let handle = Player::builder().volume(0.5).run();
+    let handle = Player::builder().volumehttps://github.com/sautibara/sauti/blob/main/LICENSE(0.5).run();
     // begin playing the file by the path that was given
     handle.play(path)?;
 
@@ -37,6 +39,45 @@ pub fn main() -> Result<(), sauti::player::Disconnected> {
     Ok(())
 }
 ```
+
+## Metadata Decoder
+
+```rust
+use std::{error::Error, path::PathBuf};
+
+use sauti::decoder::metadata::prelude::*;
+use sauti::decoder::metadata::DynDecoder;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // Read the path to read as the first argument.
+    let Some(path) = std::env::args().nth(1) else {
+        println!("usage: {{command}} {{path}}");
+        return Ok(());
+    };
+
+    // Create a metadata decoder using the default decoders.
+    let decoder = sauti::decoder::metadata::default();
+
+    // Read the path into an opaque metadata struct.
+    let source = sauti::data::MediaSource::Path(PathBuf::from(&path));
+    let metadata = decoder.read(&source)?;
+
+    // Read the title, album, and artist of the file.
+    let title = metadata.get(FrameId::Title);
+    let title = title.as_string().unwrap_or("<unknown>");
+    let album = metadata.get(FrameId::Album);
+    let album = album.as_string().unwrap_or("<unknown>");
+    let album = metadata.get(FrameId::Artist);
+    let album = album.as_string().unwrap_or("<unknown>");
+
+    // Then print out the components.
+    println!("Track: '{title}' by '{artists}' in '{album}'");
+
+    Ok(())
+}
+```
+
+## Others
 
 See other examples in the [examples directory](https://github.com/sautibara/sauti/tree/main/sauti/examples).
 

@@ -16,6 +16,7 @@ pub mod prelude {
     pub use super::Tag as _;
 
     pub use super::data_iter::DataIterExt as _;
+    pub use super::frame_iter::FrameIterExt as _;
     pub use gat_lending_iterator::LendingIterator as _;
 
     pub use gat_borrow::IntoOwnedImpl as _;
