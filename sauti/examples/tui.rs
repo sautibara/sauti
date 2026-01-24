@@ -5,8 +5,6 @@ use std::{io::Write, ops::ControlFlow, sync::OnceLock};
 use sauti::player::{prelude::*, Disconnected, Handle};
 
 pub fn main() -> Result<(), Disconnected> {
-    env_logger::init();
-
     let handle = Player::builder().volume(0.5).run();
 
     loop {

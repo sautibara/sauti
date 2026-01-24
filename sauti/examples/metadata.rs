@@ -1,7 +1,6 @@
 use std::{error::Error, path::PathBuf};
 
 use sauti::decoder::metadata::prelude::*;
-use sauti::decoder::metadata::DynDecoder;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Read the path to read as the first argument.
