@@ -69,16 +69,13 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
-            match data {
-                DataCow::Owned(Data::Text(owned) | Data::Link(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::Text(borrow) | DataRef::Link(borrow)) => {
-                    Some(Boo::Borrowed(borrow))
-                }
-                _ => None,
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::Text(owned) | Data::Link(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::Text(borrow) | DataRef::Link(borrow)) => {
+                Some(Boo::Borrowed(borrow))
             }
-        }
-        Filtered::new(self, func)
+            _ => None,
+        })
     }
 
     /// Creates an iterator over references to yielded [text](DataLike::as_text) objects.
@@ -88,14 +85,11 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
-            match data {
-                DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
-                _ => None,
-            }
-        }
-        Filtered::new(self, func)
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
+            _ => None,
+        })
     }
 
     /// Creates an iterator over references to yielded [link](DataLike::as_link) objects.
@@ -105,14 +99,11 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, &str>> {
-            match data {
-                DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
-                _ => None,
-            }
-        }
-        Filtered::new(self, func)
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::Text(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::Text(borrow)) => Some(Boo::Borrowed(borrow)),
+            _ => None,
+        })
     }
 
     /// Creates an iterator over references to yielded [picture](DataLike::as_picture) objects.
@@ -122,14 +113,11 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, PictureRef<'_>>> {
-            match data {
-                DataCow::Owned(Data::Picture(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::Picture(borrow)) => Some(Boo::Borrowed(borrow)),
-                _ => None,
-            }
-        }
-        Filtered::new(self, func)
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::Picture(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::Picture(borrow)) => Some(Boo::Borrowed(borrow)),
+            _ => None,
+        })
     }
 
     /// Creates an iterator over references to yielded
@@ -141,14 +129,11 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, InvolvedPeopleRef<'_>>> {
-            match data {
-                DataCow::Owned(Data::InvolvedPeople(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::InvolvedPeople(borrow)) => Some(Boo::Borrowed(borrow)),
-                _ => None,
-            }
-        }
-        Filtered::new(self, func)
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::InvolvedPeople(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::InvolvedPeople(borrow)) => Some(Boo::Borrowed(borrow)),
+            _ => None,
+        })
     }
 
     /// Creates an iterator over references to yielded [binary objects](DataLike::as_object).
@@ -159,14 +144,11 @@ pub trait DataIterExt<'d>: Iterator<Item = DataCow<'d>> {
     where
         Self: Sized,
     {
-        fn func(data: DataCow<'_>) -> Option<Boo<'_, ObjectRef<'_>>> {
-            match data {
-                DataCow::Owned(Data::Object(owned)) => Some(Boo::Owned(owned)),
-                DataCow::Ref(DataRef::Object(borrow)) => Some(Boo::Borrowed(borrow)),
-                _ => None,
-            }
-        }
-        Filtered::new(self, func)
+        Filtered::new(self, |data| match data {
+            DataCow::Owned(Data::Object(owned)) => Some(Boo::Owned(owned)),
+            DataCow::Ref(DataRef::Object(borrow)) => Some(Boo::Borrowed(borrow)),
+            _ => None,
+        })
     }
 }
 

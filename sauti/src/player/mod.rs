@@ -56,6 +56,15 @@
 
 // TODO: setting device options
 
+// TODO: support gapless playback - when a file is almost finished playing, send a message to
+// prepare a new file to play. When the player gets this new file, it marks it down as the next file
+// to play. Once the file it's currently playing finishes, it'll automatically start playing the
+// next file.
+//
+// Then, the user of the library could optionally call the play function again (due to an
+// automatic handler) and it should be handled so that if it's the same as the queued file then
+// nothing happens, but if it's a different file it'll change (it's like debouncing?).
+
 /// Useful types for interacting with a [`Player`]
 pub mod prelude {
     pub use super::{
@@ -1116,7 +1125,7 @@ impl Generic for Handle {
 }
 
 /// The current state of playing audio in a [`Player`]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PlayState {
     /// Audio is playing; packets are being decoded and sent to an output device
@@ -1126,6 +1135,7 @@ pub enum PlayState {
     Paused,
     /// audio is not playing, there is no song stored in the player, and the output
     /// device is sleeping (if possible)
+    #[default]
     Stopped,
 }
 
@@ -1152,12 +1162,6 @@ impl PlayState {
     #[must_use]
     pub const fn is_stopped(self) -> bool {
         matches!(self, Self::Stopped)
-    }
-}
-
-impl Default for PlayState {
-    fn default() -> Self {
-        Self::Stopped
     }
 }
 

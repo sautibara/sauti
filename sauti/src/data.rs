@@ -489,6 +489,7 @@ impl<S: ConvertibleSample> SoundPacket<S> {
         self.copy_to_channels_unchecked(channels);
     }
 
+    #[allow(clippy::needless_range_loop)] // false positive
     pub(crate) fn copy_to_channels_unchecked(&self, channels: &mut [Vec<S>]) {
         let channel_count = self.channels();
         for frame in 0..self.frames() {

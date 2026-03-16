@@ -14,10 +14,12 @@ use super::prelude::*;
 
 // options stuff //
 
+#[allow(clippy::manual_is_variant_and)] // that's the point
 fn is_none_or<T>(opt: Option<T>, predicate: impl FnOnce(T) -> bool) -> bool {
     opt.is_none() || opt.is_some_and(predicate)
 }
 
+#[allow(clippy::manual_is_variant_and)]
 fn is_none_or_eq<T: PartialEq<T>>(opt: Option<&T>, val: &T) -> bool {
     opt.is_none() || opt.is_some_and(|opt| opt == val)
 }
