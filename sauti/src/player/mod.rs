@@ -313,7 +313,6 @@ pub trait Generic {
     ///
     /// ```
     /// # fn main() -> Result<(), sauti::player::Disconnected> {
-    /// # env_logger::init();
     /// use sauti::player::prelude::*;
     /// use sauti::test::prelude::*;
     ///
